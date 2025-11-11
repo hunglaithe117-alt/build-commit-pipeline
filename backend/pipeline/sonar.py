@@ -67,9 +67,7 @@ class SonarCommitRunner:
         self.logs_dir = self.work_dir / "logs"
         self.work_dir.mkdir(parents=True, exist_ok=True)
         self.logs_dir.mkdir(parents=True, exist_ok=True)
-        self.scanner_bin = self.instance.resolved_scanner(
-            settings.sonarqube.scanner_bin
-        )
+        self.scanner_bin = settings.sonarqube.scanner_bin
         self.host = self.instance.host.rstrip("/")
         self.token = self.instance.resolved_token()
         self.session = requests.Session()

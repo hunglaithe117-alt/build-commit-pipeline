@@ -15,9 +15,10 @@ class PathsSettings(BaseModel):
     uploads: Path = Field(default=Path("/app/data/uploads"))
     exports: Path = Field(default=Path("/app/data/exports"))
     dead_letter: Path = Field(default=Path("/app/data/dead_letter"))
-    sonar_instances_config: Path = Field(default=Path("/app/sonar-scan/sonar_instances.example.json"))
+    sonar_instances_config: Path = Field(
+        default=Path("/app/sonar-scan/sonar_instances.example.json")
+    )
     default_workdir: Path = Field(default=Path("/app/data/sonar-work"))
-    travistorrent_root: Optional[Path] = None
 
 
 class MongoSettings(BaseModel):
@@ -51,7 +52,6 @@ class SonarInstanceSettings(BaseModel):
     host: str
     token_env: Optional[str] = Field(default=None)
     token: Optional[str] = Field(default=None)
-    scanner_bin: Optional[str] = Field(default=None)
 
     def resolved_token(self) -> str:
         if self.token:
@@ -65,33 +65,16 @@ class SonarInstanceSettings(BaseModel):
             "Configure `token` or `token_env`."
         )
 
-    def resolved_scanner(self, fallback: str) -> str:
-        return self.scanner_bin or fallback
-
 
 class SonarSettings(BaseModel):
-    host: str = Field(default="http://localhost:9000")
-    token_env: Optional[str] = Field(default="SONARQUBE_TOKEN")
-    token: Optional[str] = None
     scanner_bin: str = Field(default="sonar-scanner")
     webhook_secret: str = Field(default="change-me")
     webhook_public_url: str = Field(default="http://localhost:8000/api/sonar/webhook")
     measures: SonarMeasures = Field(default_factory=SonarMeasures)
     instances: List[SonarInstanceSettings] = Field(default_factory=list)
-    default_instance: Optional[str] = None
 
     def get_instances(self) -> List[SonarInstanceSettings]:
-        if self.instances:
-            return self.instances
-        return [
-            SonarInstanceSettings(
-                name="default",
-                host=self.host,
-                token=self.token,
-                token_env=self.token_env,
-                scanner_bin=self.scanner_bin,
-            )
-        ]
+        return self.instances
 
     def get_instance(self, name: Optional[str] = None) -> SonarInstanceSettings:
         instances = self.get_instances()
@@ -100,10 +83,6 @@ class SonarSettings(BaseModel):
                 if instance.name == name:
                     return instance
             raise ValueError(f"Sonar instance '{name}' is not configured.")
-        if self.default_instance:
-            for instance in instances:
-                if instance.name == self.default_instance:
-                    return instance
         return instances[0]
 
 

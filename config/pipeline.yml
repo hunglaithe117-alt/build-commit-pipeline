@@ -22,17 +22,13 @@ pipeline:
   default_retry_limit: 5
   csv_encoding: utf-8
 sonarqube:
-  host: http://localhost:9001
-  token_env: SONARQUBE_TOKEN
   scanner_bin: sonar-scanner
   webhook_secret: change-me
   webhook_public_url: http://localhost:8000/api/sonar/webhook
-  default_instance: primary
   instances:
     - name: primary
       host: http://localhost:9001
       token_env: SONARQUBE_TOKEN
-      scanner_bin: sonar-scanner
     - name: secondary
       host: http://sonarqube2:9002
       token_env: SONARQUBE_TOKEN_SECONDARY
