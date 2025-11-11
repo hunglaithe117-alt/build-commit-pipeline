@@ -24,7 +24,8 @@ Observability
 - `backend/` – FastAPI app (`app/main.py`), cấu hình Celery (`app/celery_app.py`), service layer (`app/services/*`), pipelines (`backend/pipeline/*`).
 - `frontend/` – Next.js 14 app cung cấp 4 màn hình: nguồn dữ liệu, job thu thập, SonarQube runs, output.
 - `config/pipeline.yml` – YAML cấu hình duy nhất cho kết nối Mongo/RabbitMQ, đường dẫn Sonar script, các metric keys muốn export.
-- `docker-compose.yml` – Khởi chạy API + worker + beat + frontend + RabbitMQ + Mongo. Mặc định mount thư mục `../sonar-scan` để tái sử dụng các script hiện có.
+- `docker-compose.yml` – Khởi chạy API + worker + beat + frontend + RabbitMQ + Mongo. Mặc định mount thư mục `../sonar-scan` để tái sử dụng các script hiện có, đồng thời tạo hai database Postgres riêng cho từng SonarQube instance.
+- `config/postgres-init.sql` – Script khởi tạo `sonar_primary` và `sonar_secondary` để mỗi SonarQube dùng database riêng, tránh xung đột migration.
 - `data/` – Lưu file upload, dead-letter artifact, và CSV metrics sau khi export (được mount vào containers).
 
 ## Quick start (chạy nhanh)
@@ -138,6 +139,7 @@ Mỗi commit từ CSV sẽ được gán lần lượt cho từng instance. Thô
 
 - Hệ thống sử dụng `instance_locks` trong Mongo để đảm bảo **mỗi SonarQube chỉ xử lý một CSV tại một thời điểm**. Nếu có nhiều CSV hơn số instance, các job mới sẽ tự động chờ cho tới khi một instance rảnh và Celery sẽ retry.
 - Khi một instance đã được cấp phát cho một CSV, toàn bộ commit trong file đó sẽ chạy tuần tự trên instance đó cho tới khi hoàn thành (hoặc lỗi). Điều này giúp bạn dễ dàng scale “2 SonarQube = 2 CSV chạy song song”.
+- Docker Compose đã cấu hình sẵn hai database Postgres (`sonar_primary`, `sonar_secondary`) thông qua `config/postgres-init.sql`, vì vậy mỗi SonarQube container sử dụng schema riêng biệt và không tranh chấp migration. Nếu bạn đã chạy phiên bản cũ (một database), hãy xóa volume `postgres_data` trước khi khởi động lại để script có cơ hội tạo schema mới.
 
 ## Observability (Grafana + Loki)
 
