@@ -79,7 +79,7 @@ class CSVIngestionPipeline:
         unique_commits = list(dict.fromkeys(commits))
         return {
             "project_name": project_name,
-            "project_key": self.csv_path.stem,
+            "project_key": (list(repos)[0].replace("/", "_", 1)),
             "total_builds": total_builds,
             "total_commits": len(unique_commits),
             "unique_branches": len(branches),
