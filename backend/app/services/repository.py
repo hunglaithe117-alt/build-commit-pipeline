@@ -162,10 +162,16 @@ class MongoRepository:
         data_source_id: str,
         max_concurrent: int = 2,
     ) -> bool:
+        """
+        Acquire a lock slot for the given instance.
+        Returns True if lock acquired, False if instance is at capacity.
+        """
+        from app.core.config import settings
 
         now = datetime.utcnow()
         collection = self.db[self.collections.instance_locks_collection]
 
+        # Check if this job already has a lock
         existing = collection.find_one(
             {"instance": instance_name, "active_jobs.job_id": job_id}
         )
@@ -173,12 +179,28 @@ class MongoRepository:
             return True
 
         max_jobs = max_concurrent or settings.sonarqube.max_concurrent_jobs_per_instance
-        doc = collection.find_one_and_update(
+
+        # Ensure the instance document exists first
+        collection.update_one(
+            {"instance": instance_name},
+            {
+                "$setOnInsert": {
+                    "instance": instance_name,
+                    "active_jobs": [],
+                    "created_at": now,
+                }
+            },
+            upsert=True,
+        )
+
+        # Try to acquire a slot by pushing to active_jobs only if under capacity
+        # We can't use $expr with upsert, so we use a simple query and check size after
+        result = collection.update_one(
             {
                 "instance": instance_name,
-                "$expr": {
-                    "$lt": [{"$size": {"$ifNull": ["$active_jobs", []]}}, max_jobs]
-                },
+                f"active_jobs.{max_jobs - 1}": {
+                    "$exists": False
+                },  # Array has less than max_jobs elements
             },
             {
                 "$push": {
@@ -189,17 +211,11 @@ class MongoRepository:
                     }
                 },
                 "$set": {"updated_at": now},
-                "$setOnInsert": {"instance": instance_name, "created_at": now},
             },
-            upsert=True,
-            return_document=ReturnDocument.AFTER,
         )
 
-        if doc:
-            # Verify the job was added
-            active_jobs = doc.get("active_jobs", [])
-            return any(j.get("job_id") == job_id for j in active_jobs)
-        return False
+        # Return True if we successfully added the job
+        return result.modified_count > 0
 
     def release_instance_lock(
         self, instance_name: str, job_id: Optional[str] = None
