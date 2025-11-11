@@ -40,8 +40,9 @@ def ingest_data_source(self, data_source_id: str) -> dict:
 
     instances = settings.sonarqube.get_instances()
     assigned_instance = None
+    max_concurrent = settings.sonarqube.max_concurrent_jobs_per_instance
     for candidate in instances:
-        if repository.acquire_instance_lock(candidate.name, job["id"], data_source_id):
+        if repository.acquire_instance_lock(candidate.name, job["id"], data_source_id, max_concurrent):
             assigned_instance = candidate
             break
     if not assigned_instance:
@@ -70,7 +71,7 @@ def ingest_data_source(self, data_source_id: str) -> dict:
             if job_finished:
                 break
     finally:
-        repository.release_instance_lock(assigned_instance.name)
+        repository.release_instance_lock(assigned_instance.name, job["id"])
 
     logger.info(
         "Completed %d commits for job %s on instance %s",

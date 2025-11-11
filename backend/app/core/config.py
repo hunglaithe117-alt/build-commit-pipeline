@@ -63,6 +63,7 @@ class SonarInstanceSettings(BaseModel):
 class SonarSettings(BaseModel):
     webhook_secret: str = Field(default="change-me")
     webhook_public_url: str = Field(default="http://localhost:8000/api/sonar/webhook")
+    max_concurrent_jobs_per_instance: int = Field(default=2)
     measures: SonarMeasures = Field(default_factory=SonarMeasures)
     instances: List[SonarInstanceSettings] = Field(default_factory=list)
 

@@ -12,7 +12,6 @@ _UNSET = object()
 
 
 class MongoRepository:
-    """MongoDB helper focused on pipeline collections."""
 
     def __init__(self) -> None:
         self.client = MongoClient(settings.mongo.uri, **settings.mongo.options)
@@ -65,14 +64,20 @@ class MongoRepository:
         )
         return self._serialize(doc) if doc else None
 
-    def find_data_source_by_project_key(self, project_key: str) -> Optional[Dict[str, Any]]:
+    def find_data_source_by_project_key(
+        self, project_key: str
+    ) -> Optional[Dict[str, Any]]:
         doc = self.db[self.collections.data_sources_collection].find_one(
             {"stats.project_key": project_key}
         )
         return self._serialize(doc) if doc else None
 
     def update_data_source(
-        self, data_source_id: str, *, status: Optional[str] = None, stats: Optional[Dict[str, Any]] = None
+        self,
+        data_source_id: str,
+        *,
+        status: Optional[str] = None,
+        stats: Optional[Dict[str, Any]] = None,
     ) -> Optional[Dict[str, Any]]:
         updates: Dict[str, Any] = {"updated_at": datetime.utcnow()}
         if status:
@@ -104,7 +109,7 @@ class MongoRepository:
             "total": total,
             "last_error": None,
             "current_commit": None,
-             "sonar_instance": sonar_instance,
+            "sonar_instance": sonar_instance,
             "created_at": now,
             "updated_at": now,
         }
@@ -113,7 +118,9 @@ class MongoRepository:
         return payload
 
     def get_job(self, job_id: str) -> Optional[Dict[str, Any]]:
-        doc = self.db[self.collections.jobs_collection].find_one({"_id": ObjectId(job_id)})
+        doc = self.db[self.collections.jobs_collection].find_one(
+            {"_id": ObjectId(job_id)}
+        )
         return self._serialize(doc) if doc else None
 
     def update_job(
@@ -149,47 +156,99 @@ class MongoRepository:
         return self._serialize(doc) if doc else None
 
     def acquire_instance_lock(
-        self, instance_name: str, job_id: str, data_source_id: str
+        self,
+        instance_name: str,
+        job_id: str,
+        data_source_id: str,
+        max_concurrent: int = 2,
     ) -> bool:
+
         now = datetime.utcnow()
         collection = self.db[self.collections.instance_locks_collection]
+
+        existing = collection.find_one(
+            {"instance": instance_name, "active_jobs.job_id": job_id}
+        )
+        if existing:
+            return True
+
+        max_jobs = max_concurrent or settings.sonarqube.max_concurrent_jobs_per_instance
         doc = collection.find_one_and_update(
             {
                 "instance": instance_name,
-                "$or": [
-                    {"status": {"$exists": False}},
-                    {"status": {"$in": ["idle", "available"]}},
-                    {"job_id": job_id},
-                ],
+                "$expr": {
+                    "$lt": [{"$size": {"$ifNull": ["$active_jobs", []]}}, max_jobs]
+                },
             },
             {
-                "$set": {
-                    "instance": instance_name,
-                    "status": "busy",
-                    "job_id": job_id,
-                    "data_source_id": data_source_id,
-                    "updated_at": now,
+                "$push": {
+                    "active_jobs": {
+                        "job_id": job_id,
+                        "data_source_id": data_source_id,
+                        "acquired_at": now,
+                    }
                 },
-                "$setOnInsert": {"created_at": now},
+                "$set": {"updated_at": now},
+                "$setOnInsert": {"instance": instance_name, "created_at": now},
             },
             upsert=True,
             return_document=ReturnDocument.AFTER,
         )
-        return bool(doc and doc.get("status") == "busy" and doc.get("job_id") == job_id)
 
-    def release_instance_lock(self, instance_name: str) -> None:
+        if doc:
+            # Verify the job was added
+            active_jobs = doc.get("active_jobs", [])
+            return any(j.get("job_id") == job_id for j in active_jobs)
+        return False
+
+    def release_instance_lock(
+        self, instance_name: str, job_id: Optional[str] = None
+    ) -> None:
+        """
+        Release a lock slot for the given instance.
+        If job_id is provided, only that specific job is removed.
+        """
         collection = self.db[self.collections.instance_locks_collection]
-        collection.update_one(
-            {"instance": instance_name},
-            {
-                "$set": {
-                    "status": "idle",
-                    "job_id": None,
-                    "data_source_id": None,
-                    "updated_at": datetime.utcnow(),
-                }
-            },
-        )
+
+        if job_id:
+            # Remove specific job from active_jobs array
+            collection.update_one(
+                {"instance": instance_name},
+                {
+                    "$pull": {"active_jobs": {"job_id": job_id}},
+                    "$set": {"updated_at": datetime.utcnow()},
+                },
+            )
+        else:
+            # Legacy: clear all jobs (for backward compatibility)
+            collection.update_one(
+                {"instance": instance_name},
+                {
+                    "$set": {
+                        "active_jobs": [],
+                        "updated_at": datetime.utcnow(),
+                    }
+                },
+            )
+
+    def get_instance_capacity(self, instance_name: str) -> Dict[str, int]:
+        """
+        Get the current capacity status of a SonarQube instance.
+        Returns dict with 'active_count' and 'max_concurrent'.
+        """
+        from app.core.config import settings
+
+        collection = self.db[self.collections.instance_locks_collection]
+        doc = collection.find_one({"instance": instance_name})
+
+        active_jobs = doc.get("active_jobs", []) if doc else []
+        return {
+            "active_count": len(active_jobs),
+            "max_concurrent": settings.sonarqube.max_concurrent_jobs_per_instance,
+            "available_slots": settings.sonarqube.max_concurrent_jobs_per_instance
+            - len(active_jobs),
+            "active_jobs": [j.get("job_id") for j in active_jobs],
+        }
 
     def list_jobs(self, limit: int = 100) -> List[Dict[str, Any]]:
         cursor = (
@@ -262,13 +321,17 @@ class MongoRepository:
         )
         return [self._serialize(doc) for doc in cursor]
 
-    def find_sonar_run_by_component(self, component_key: str) -> Optional[Dict[str, Any]]:
+    def find_sonar_run_by_component(
+        self, component_key: str
+    ) -> Optional[Dict[str, Any]]:
         doc = self.db[self.collections.sonar_runs_collection].find_one(
             {"component_key": component_key}
         )
         return self._serialize(doc) if doc else None
 
-    def insert_dead_letter(self, payload: Dict[str, Any], reason: str) -> Dict[str, Any]:
+    def insert_dead_letter(
+        self, payload: Dict[str, Any], reason: str
+    ) -> Dict[str, Any]:
         now = datetime.utcnow()
         doc = {
             "payload": payload,
@@ -311,6 +374,37 @@ class MongoRepository:
     def get_output(self, output_id: str) -> Optional[Dict[str, Any]]:
         doc = self.db[self.collections.outputs_collection].find_one(
             {"_id": ObjectId(output_id)}
+        )
+        return self._serialize(doc) if doc else None
+
+    def update_output(
+        self,
+        output_id: str,
+        *,
+        metrics: Optional[List[str]] = None,
+        record_count: Optional[int] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """Update an existing output record."""
+        updates: Dict[str, Any] = {}
+        if metrics is not None:
+            updates["metrics"] = metrics
+        if record_count is not None:
+            updates["record_count"] = record_count
+        if not updates:
+            return self.get_output(output_id)
+        doc = self.db[self.collections.outputs_collection].find_one_and_update(
+            {"_id": ObjectId(output_id)},
+            {"$set": updates},
+            return_document=ReturnDocument.AFTER,
+        )
+        return self._serialize(doc) if doc else None
+
+    def find_output_by_job_and_path(
+        self, job_id: str, path: str
+    ) -> Optional[Dict[str, Any]]:
+        """Find an output record by job_id and file path."""
+        doc = self.db[self.collections.outputs_collection].find_one(
+            {"job_id": job_id, "path": path}
         )
         return self._serialize(doc) if doc else None
 

@@ -272,6 +272,31 @@ class MetricsExporter:
             handle.write(",".join(row) + "\n")
         return measures
 
+    def append_commit_metrics(
+        self, component_key: str, destination: Path, commit_sha: Optional[str] = None
+    ) -> Dict[str, str]:
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        measures = self._fetch_measures(component_key, self.metrics)
+        if not measures:
+            LOG.warning(f"No measures returned for {component_key}")
+            return {}
+
+        file_exists = destination.exists() and destination.stat().st_size > 0
+        headers = ["component_key", "commit_sha", *self.metrics]
+
+        with destination.open("a", encoding="utf-8") as handle:
+            if not file_exists:
+                handle.write(",".join(headers) + "\n")
+            row = [
+                component_key,
+                commit_sha or "",
+                *[str(measures.get(metric, "")) for metric in self.metrics],
+            ]
+            handle.write(",".join(row) + "\n")
+
+        LOG.info(f"Appended metrics for {component_key} to {destination}")
+        return measures
+
 
 __all__ = [
     "SonarCommitRunner",

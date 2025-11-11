@@ -128,51 +128,91 @@ def run_commit_scan(self, job_id: str, data_source_id: str, commit: Dict[str, st
     try:
         component_key, job_finished = process_commit(job_id, data_source_id, commit, runner)
     except Exception:
-        repository.release_instance_lock(runner.instance.name)
+        repository.release_instance_lock(runner.instance.name, job_id)
         raise
     if job_finished:
-        repository.release_instance_lock(runner.instance.name)
+        repository.release_instance_lock(runner.instance.name, job_id)
     return component_key
 
 
 @celery_app.task(bind=True, autoretry_for=(Exception,), retry_backoff=True, retry_kwargs={"max_retries": 3})
 def export_metrics(
     self,
-    project_key: str,
+    component_key: str,
     job_id: Optional[str] = None,
     data_source_id: Optional[str] = None,
     analysis_id: Optional[str] = None,
 ) -> str:
-    run_doc = repository.find_sonar_run_by_component(project_key)
+    """
+    Export metrics for a single commit/component and append to the repo's CSV file.
+    Each repo (project_key) gets one aggregated CSV with all commits.
+    """
+    run_doc = repository.find_sonar_run_by_component(component_key)
     if run_doc:
         instance = settings.sonarqube.get_instance(run_doc.get("sonar_instance"))
         target_job_id = job_id or run_doc.get("job_id") or "ad-hoc"
         target_ds = data_source_id or run_doc.get("data_source_id")
+        project_key = run_doc.get("project_key", "unknown")
+        commit_sha = run_doc.get("commit_sha")
     else:
         instance = settings.sonarqube.get_instance()
         target_job_id = job_id or "ad-hoc"
         target_ds = data_source_id
+        # Extract project_key from component_key (format: projectkey_commitsha)
+        parts = component_key.rsplit("_", 1)
+        project_key = parts[0] if len(parts) > 1 else component_key
+        commit_sha = parts[1] if len(parts) > 1 else None
+
     exporter = MetricsExporter.from_instance(instance)
+    
+    # Use project_key for filename so all commits of same repo go to same file
     destination = Path(settings.paths.exports) / f"{project_key}_metrics.csv"
-    measures = exporter.export_project(project_key, destination)
-    repository.add_output(
-        job_id=target_job_id,
-        path=str(destination),
-        metrics=list(measures.keys()),
-        record_count=1,
-    )
+    
+    # Append this commit's metrics to the CSV
+    measures = exporter.append_commit_metrics(component_key, destination, commit_sha)
+    
+    if not measures:
+        logger.warning(f"No measures exported for {component_key}")
+        return str(destination)
+    
+    # Count total records in the CSV file
+    record_count = 0
+    if destination.exists():
+        with destination.open("r", encoding="utf-8") as f:
+            record_count = sum(1 for _ in f) - 1  # Subtract header row
+    
+    # Create or update output record
+    if target_job_id:
+        existing_output = repository.find_output_by_job_and_path(target_job_id, str(destination))
+        if existing_output:
+            # Update existing output with new record count
+            repository.update_output(
+                existing_output["id"],
+                metrics=list(measures.keys()),
+                record_count=record_count,
+            )
+        else:
+            # Create new output record
+            repository.add_output(
+                job_id=target_job_id,
+                path=str(destination),
+                metrics=list(measures.keys()),
+                record_count=record_count,
+            )
+    
     if target_ds:
         repository.upsert_sonar_run(
             data_source_id=target_ds,
-            project_key=run_doc.get("project_key", project_key) if run_doc else project_key,
-            commit_sha=run_doc.get("commit_sha") if run_doc else None,
+            project_key=project_key,
+            commit_sha=commit_sha,
             job_id=target_job_id,
             status="succeeded",
             analysis_id=analysis_id,
             metrics_path=str(destination),
-            component_key=project_key,
+            component_key=component_key,
             sonar_instance=instance.name,
             sonar_host=instance.host,
         )
-    logger.info("Metrics exported to %s", destination)
+    
+    logger.info("Metrics for %s appended to %s (total records: %d)", component_key, destination, record_count)
     return str(destination)
