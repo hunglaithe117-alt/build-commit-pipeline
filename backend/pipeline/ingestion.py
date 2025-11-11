@@ -75,8 +75,6 @@ class CSVIngestionPipeline:
             repo_url = None
             if not repo_url and repo_slug:
                 repo_url = f"https://github.com/{repo_slug}.git"
-            if repo_url:
-                repos.add(repo_url)
 
         unique_commits = list(dict.fromkeys(commits))
         return {
@@ -85,7 +83,6 @@ class CSVIngestionPipeline:
             "total_builds": total_builds,
             "total_commits": len(unique_commits),
             "unique_branches": len(branches),
-            "unique_repos": len(repos),
             "first_commit": unique_commits[0] if unique_commits else None,
             "last_commit": unique_commits[-1] if unique_commits else None,
         }

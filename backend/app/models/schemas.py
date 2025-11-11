@@ -28,7 +28,6 @@ class CSVSummary(BaseModel):
     total_builds: int = 0
     total_commits: int = 0
     unique_branches: int = 0
-    unique_repos: int = 0
     first_commit: Optional[str] = None
     last_commit: Optional[str] = None
 

@@ -4,7 +4,6 @@ export type CSVSummary = {
   total_builds: number;
   total_commits: number;
   unique_branches: number;
-  unique_repos: number;
   first_commit?: string | null;
   last_commit?: string | null;
 };
