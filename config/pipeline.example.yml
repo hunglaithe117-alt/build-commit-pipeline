@@ -11,8 +11,9 @@ mongo:
   database: travistorrent_pipeline
   options:
     authSource: admin
-redis:
-  url: redis://redis:6379/0
+broker:
+  url: amqp://pipeline:pipeline@rabbitmq:5672//
+  result_backend: rpc://
   default_queue: pipeline.default
   dead_letter_queue: pipeline.dlq
 pipeline:

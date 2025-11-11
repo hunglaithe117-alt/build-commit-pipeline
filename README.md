@@ -1,6 +1,6 @@
 # build-commit-pipeline
 
-Pipeline thu thập & làm giàu TravisTorrent với FastAPI + Celery + Redis + MongoDB, tích hợp SonarQube webhook và giao diện Next.js để quản lý toàn bộ quy trình.
+Pipeline thu thập & làm giàu TravisTorrent với FastAPI + Celery + RabbitMQ + MongoDB, tích hợp SonarQube webhook và giao diện Next.js để quản lý toàn bộ quy trình.
 
 ## Kiến trúc tổng quan
 
@@ -10,7 +10,7 @@ frontend (Next.js)
 backend (FastAPI)
     ├── API đồng bộ (upload CSV, trigger job, liệt kê SonarQube runs, tải output)
     ├── Celery worker xử lý ingestion + scan + export metrics
-    ├── Redis làm broker/queue + Dead Letter Queue (Mongo)
+    ├── RabbitMQ làm broker/queue + Dead Letter Queue (Mongo)
     ├── MongoDB lưu metadata dataset, job queue, DLQ, đường dẫn output
     └── Module `pipeline/sonar.py` tái hiện logic của `sonar_scan_csv_multi.py` để clone repo, checkout commit và chạy sonar-scanner
 SonarQube
@@ -23,13 +23,13 @@ Observability
 
 - `backend/` – FastAPI app (`app/main.py`), cấu hình Celery (`app/celery_app.py`), service layer (`app/services/*`), pipelines (`backend/pipeline/*`).
 - `frontend/` – Next.js 14 app cung cấp 4 màn hình: nguồn dữ liệu, job thu thập, SonarQube runs, output.
-- `config/pipeline.yml` – YAML cấu hình duy nhất cho kết nối Mongo/Redis, đường dẫn Sonar script, các metric keys muốn export.
-- `docker-compose.yml` – Khởi chạy API + worker + beat + frontend + Redis + Mongo. Mặc định mount thư mục `../sonar-scan` để tái sử dụng các script hiện có.
+- `config/pipeline.yml` – YAML cấu hình duy nhất cho kết nối Mongo/RabbitMQ, đường dẫn Sonar script, các metric keys muốn export.
+- `docker-compose.yml` – Khởi chạy API + worker + beat + frontend + RabbitMQ + Mongo. Mặc định mount thư mục `../sonar-scan` để tái sử dụng các script hiện có.
 - `data/` – Lưu file upload, dead-letter artifact, và CSV metrics sau khi export (được mount vào containers).
 
 ## Quick start (chạy nhanh)
 
-Chạy toàn bộ stack bằng Docker (gồm API, worker, frontend, Redis, Mongo, SonarQube nếu bạn có cấu hình):
+Chạy toàn bộ stack bằng Docker (gồm API, worker, frontend, RabbitMQ, Mongo, SonarQube nếu bạn có cấu hình):
 
 ```bash
 # đặt biến môi trường token SonarQube cho shell (zsh)
@@ -61,7 +61,7 @@ npm run dev
 ## Troubleshooting
 
 - SonarQube không gửi webhook: kiểm tra `sonarqube.webhook_secret` trong `config/pipeline.yml` và đảm bảo endpoint `http://<host>:8000/api/sonar/webhook` có thể truy cập từ SonarQube container.
-- Celery không thực thi task: kiểm tra broker (Redis) URL và rằng worker đang chạy (`uv run celery -A app.celery_app.celery_app worker -l info`).
+- Celery không thực thi task: kiểm tra broker (RabbitMQ) URL và rằng worker đang chạy (`uv run celery -A app.celery_app.celery_app worker -l info`).
 - Kết nối Mongo thất bại: kiểm tra chuỗi kết nối trong `config/pipeline.yml` và đảm bảo Mongo đã khởi động trước khi API kết nối.
 - SonarScanner không chạy: đảm bảo SonarScanner CLI có sẵn trên host/container và biến `SONARQUBE_TOKEN` hợp lệ.
 
@@ -101,7 +101,7 @@ SONARQUBE_TOKEN=xxxx docker compose up --build
 - API: <http://localhost:8000>
 - Frontend: <http://localhost:3000>
 - Mongo: mongodb://travis:travis@localhost:27017 (authSource=admin)
-- Redis: redis://localhost:6379/0
+- RabbitMQ: amqp://pipeline:pipeline@localhost:5672//
 
 ## Quy trình sử dụng giao diện
 
@@ -147,7 +147,7 @@ Mỗi commit từ CSV sẽ được gán lần lượt cho từng instance. Thô
   - `grafana` (port 3001, admin/admin) để trực quan hóa.
 - Sau khi `docker compose up -d loki promtail grafana`, vào Grafana → add data source → Loki (`http://loki:3100`).
 - Các nhãn log quan trọng:
-  - `job="docker-containers"`: log stdout của API, Celery worker/beat, frontend, Redis, Mongo, SonarQube, v.v.
+  - `job="docker-containers"`: log stdout của API, Celery worker/beat, frontend, RabbitMQ, Mongo, SonarQube, v.v.
   - `job="sonar-commit-logs"`: log từng commit (`data/sonar-work/<instance>/<project>/logs/*.log`).
   - `job="dead-letter"`: JSON payload commit lỗi trong `data/dead_letter`.
   - `job="pipeline-error-files"`: file `data/error_logs/*.log`.
@@ -186,5 +186,5 @@ Mỗi commit từ CSV sẽ được gán lần lượt cho từng instance. Thô
 ## Mở rộng
 
 - Thêm `app/tasks/sonar.py` để hỗ trợ queue retry thủ công hoặc cron refresh.
-- Dễ dàng chuyển sang message broker khác (RabbitMQ) bằng cách chỉnh `redis.url` trong YAML + Celery config.
+- Dễ dàng chuyển sang message broker khác (ví dụ đổi RabbitMQ host) bằng cách chỉnh `broker.url` trong YAML + Celery config.
 - Có thể thêm trang quản lý DLQ bằng cách đọc collection `dead_letters`.

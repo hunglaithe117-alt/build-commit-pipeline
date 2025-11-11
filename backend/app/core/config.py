@@ -27,8 +27,9 @@ class MongoSettings(BaseModel):
     options: Dict[str, Any] = Field(default_factory=lambda: {"authSource": "admin"})
 
 
-class RedisSettings(BaseModel):
-    url: str = Field(default="redis://redis:6379/0")
+class BrokerSettings(BaseModel):
+    url: str = Field(default="amqp://pipeline:pipeline@rabbitmq:5672//")
+    result_backend: str = Field(default="rpc://")
     default_queue: str = Field(default="pipeline.default")
     dead_letter_queue: str = Field(default="pipeline.dlq")
 
@@ -97,7 +98,7 @@ class Settings(BaseModel):
     environment: str = Field(default="local")
     paths: PathsSettings = Field(default_factory=PathsSettings)
     mongo: MongoSettings = Field(default_factory=MongoSettings)
-    redis: RedisSettings = Field(default_factory=RedisSettings)
+    broker: BrokerSettings = Field(default_factory=BrokerSettings)
     pipeline: PipelineTuning = Field(default_factory=PipelineTuning)
     sonarqube: SonarSettings = Field(default_factory=SonarSettings)
     storage: StorageCollections = Field(default_factory=StorageCollections)

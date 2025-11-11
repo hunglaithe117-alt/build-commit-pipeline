@@ -274,12 +274,12 @@ class MetricsExporter:
 
     def append_commit_metrics(
         self, component_key: str, destination: Path, commit_sha: Optional[str] = None
-    ) -> Dict[str, str]:
+    ) -> tuple[Dict[str, str], int]:
         destination.parent.mkdir(parents=True, exist_ok=True)
         measures = self._fetch_measures(component_key, self.metrics)
         if not measures:
             LOG.warning(f"No measures returned for {component_key}")
-            return {}
+            return {}, 0
 
         file_exists = destination.exists() and destination.stat().st_size > 0
         headers = ["component_key", "commit_sha", *self.metrics]
@@ -294,8 +294,18 @@ class MetricsExporter:
             ]
             handle.write(",".join(row) + "\n")
 
-        LOG.info(f"Appended metrics for {component_key} to {destination}")
-        return measures
+        record_count = 0
+        if destination.exists():
+            with destination.open("r", encoding="utf-8") as handle:
+                record_count = max(sum(1 for _ in handle) - 1, 0)
+
+        LOG.info(
+            "Appended metrics for %s to %s (total rows: %d)",
+            component_key,
+            destination,
+            record_count,
+        )
+        return measures, record_count
 
 
 __all__ = [

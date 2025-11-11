@@ -143,10 +143,6 @@ def export_metrics(
     data_source_id: Optional[str] = None,
     analysis_id: Optional[str] = None,
 ) -> str:
-    """
-    Export metrics for a single commit/component and append to the repo's CSV file.
-    Each repo (project_key) gets one aggregated CSV with all commits.
-    """
     run_doc = repository.find_sonar_run_by_component(component_key)
     if run_doc:
         instance = settings.sonarqube.get_instance(run_doc.get("sonar_instance"))
@@ -158,28 +154,21 @@ def export_metrics(
         instance = settings.sonarqube.get_instance()
         target_job_id = job_id or "ad-hoc"
         target_ds = data_source_id
-        # Extract project_key from component_key (format: projectkey_commitsha)
         parts = component_key.rsplit("_", 1)
         project_key = parts[0] if len(parts) > 1 else component_key
         commit_sha = parts[1] if len(parts) > 1 else None
 
     exporter = MetricsExporter.from_instance(instance)
 
-    # Use project_key for filename so all commits of same repo go to same file
     destination = Path(settings.paths.exports) / f"{project_key}_metrics.csv"
 
-    # Append this commit's metrics to the CSV
-    measures = exporter.append_commit_metrics(component_key, destination, commit_sha)
+    measures, record_count = exporter.append_commit_metrics(
+        component_key, destination, commit_sha
+    )
 
     if not measures:
         logger.warning(f"No measures exported for {component_key}")
         return str(destination)
-
-    # Count total records in the CSV file
-    record_count = 0
-    if destination.exists():
-        with destination.open("r", encoding="utf-8") as f:
-            record_count = max(sum(1 for _ in f) - 1, 0)
 
     repo_name: Optional[str] = None
     data_source = repository.get_data_source(target_ds) if target_ds else None
@@ -204,7 +193,6 @@ def export_metrics(
                 update_kwargs["data_source_id"] = target_ds
             repository.update_output(existing_output["id"], **update_kwargs)
         else:
-            # Create new output record
             add_kwargs = {
                 "job_id": target_job_id,
                 "path": str(destination),

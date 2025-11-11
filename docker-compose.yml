@@ -13,7 +13,7 @@ services:
   #     - ./data:/app/data
   #     - ../sonar-scan:/app/sonar-scan:ro
   #   depends_on:
-  #     - redis
+  #     - rabbitmq
   #     - mongo
   #   ports:
   #     - "8000:8000"
@@ -31,7 +31,7 @@ services:
   #     - ./data:/app/data
   #     - ../sonar-scan:/app/sonar-scan:ro
   #   depends_on:
-  #     - redis
+  #     - rabbitmq
   #     - mongo
 
   # beat:
@@ -45,7 +45,7 @@ services:
   #     - ./backend:/app
   #     - ./config/pipeline.yml:/app/config/pipeline.yml:ro
   #   depends_on:
-  #     - redis
+  #     - rabbitmq
   #     - mongo
 
   # frontend:
@@ -62,11 +62,15 @@ services:
   #   ports:
   #     - "3000:3000"
 
-  redis:
-    image: redis:7.2-alpine
-    container_name: build_commit_redis
+  rabbitmq:
+    image: rabbitmq:3.12-management
+    container_name: build_commit_rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER: pipeline
+      RABBITMQ_DEFAULT_PASS: pipeline
     ports:
-      - "6379:6379"
+      - "5672:5672"
+      - "15672:15672"
 
   mongo:
     image: mongo:6.0
