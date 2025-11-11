@@ -22,32 +22,88 @@ pipeline:
   default_retry_limit: 5
   csv_encoding: utf-8
 sonarqube:
-  host: http://localhost:9000
-  token_env: SONARQUBE_TOKEN
   scanner_bin: sonar-scanner
   webhook_secret: change-me
   webhook_public_url: http://localhost:8000/api/sonar/webhook
-  default_instance: primary
   instances:
     - name: primary
-      host: http://sonarqube1:9000
-      token_env: SONARQUBE_TOKEN_PRIMARY
-      scanner_bin: sonar-scanner
+      host: http://localhost:9001
+      token_env: SONARQUBE_TOKEN
     - name: secondary
-      host: http://sonarqube2:9000
+      host: http://sonarqube2:9002
       token_env: SONARQUBE_TOKEN_SECONDARY
-      scanner_bin: sonar-scanner
   measures:
     keys:
-      - ncloc
-      - complexity
-      - cognitive_complexity
-      - coverage
-      - duplicated_lines_density
-      - vulnerabilities
       - bugs
+      - reliability_issues
+      - reliability_rating
+      - software_quality_reliability_remediation_effort
+      - software_quality_reliability_issues
+      - reliability_remediation_effort
+      - software_quality_reliability_rating
+      - vulnerabilities
+      - security_issues
+      - security_rating
+      - security_hotspots
+      - security_hotspots_reviewed_status
+      - software_quality_security_rating
+      - software_quality_security_issues
+      - software_quality_security_remediation_effort
+      - security_remediation_effort
+      - security_review_rating
+      - security_hotspots_to_review_status
       - code_smells
-      - security_hotspots_reviewed
+      - sqale_index
+      - sqale_debt_ratio
+      - sqale_rating
+      - maintainability_issues
+      - development_cost
+      - effort_to_reach_maintainability_rating_a
+      - software_quality_maintainability_debt_ratio
+      - software_quality_maintainability_remediation_effort
+      - software_quality_maintainability_rating
+      - effort_to_reach_software_quality_maintainability_rating_a
+      - coverage
+      - line_coverage
+      - lines_to_cover
+      - uncovered_lines
+      - duplicated_lines_density
+      - duplicated_lines
+      - duplicated_blocks
+      - duplicated_files
+      - cognitive_complexity
+      - complexity
+      - ncloc
+      - lines
+      - files
+      - classes
+      - functions
+      - statements
+      - ncloc_language_distribution
+      - comment_lines_density
+      - comment_lines
+      - alert_status
+      - quality_gate_details
+      - quality_profiles
+      - accepted_issues
+      - high_impact_accepted_issues
+      - software_quality_blocker_issues
+      - confirmed_issues
+      - critical_violations
+      - false_positive_issues
+      - violations
+      - software_quality_high_issues
+      - info_violations
+      - software_quality_low_issues
+      - issues_in_sandbox
+      - software_quality_maintainability_issues
+      - software_quality_info_issues
+      - minor_violations
+      - major_violations
+      - software_quality_medium_issues
+      - open_issues
+      - reopened_issues
+      - last_commit_date
     chunk_size: 25
     output_format: csv
 storage:
