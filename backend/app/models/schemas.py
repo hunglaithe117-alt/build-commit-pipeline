@@ -90,6 +90,9 @@ class DeadLetter(BaseModel):
 class OutputDataset(BaseModel):
     id: str
     job_id: str
+    data_source_id: Optional[str] = None
+    project_key: Optional[str] = None
+    repo_name: Optional[str] = None
     path: str
     metrics: list[str] = Field(default_factory=list)
     record_count: int = 0

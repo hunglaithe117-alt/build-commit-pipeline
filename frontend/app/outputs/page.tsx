@@ -24,17 +24,15 @@ export default function OutputsPage() {
       <table className="table">
         <thead>
           <tr>
-            <th>Job</th>
-            <th>Metrics</th>
-            <th>Số bản ghi</th>
+            <th>Tên repo</th>
+            <th>Số bản ghi đã quét</th>
             <th>Tải xuống</th>
           </tr>
         </thead>
         <tbody>
           {outputs.map((output) => (
             <tr key={output.id}>
-              <td>{output.job_id.slice(-8)}</td>
-              <td>{output.metrics.join(", ")}</td>
+              <td>{output.repo_name ?? output.project_key ?? output.job_id.slice(-8)}</td>
               <td>{output.record_count}</td>
               <td>
                 <a

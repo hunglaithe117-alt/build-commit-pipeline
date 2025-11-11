@@ -365,6 +365,9 @@ class MongoRepository:
         path: str,
         metrics: List[str],
         record_count: int,
+        data_source_id: Optional[str] = None,
+        project_key: Optional[str] = None,
+        repo_name: Optional[str] = None,
     ) -> Dict[str, Any]:
         now = datetime.utcnow()
         doc = {
@@ -374,6 +377,12 @@ class MongoRepository:
             "record_count": record_count,
             "created_at": now,
         }
+        if data_source_id:
+            doc["data_source_id"] = data_source_id
+        if project_key:
+            doc["project_key"] = project_key
+        if repo_name:
+            doc["repo_name"] = repo_name
         result = self.db[self.collections.outputs_collection].insert_one(doc)
         doc["id"] = str(result.inserted_id)
         return doc
@@ -399,6 +408,9 @@ class MongoRepository:
         *,
         metrics: Optional[List[str]] = None,
         record_count: Optional[int] = None,
+        data_source_id: Optional[str] = None,
+        project_key: Optional[str] = None,
+        repo_name: Optional[str] = None,
     ) -> Optional[Dict[str, Any]]:
         """Update an existing output record."""
         updates: Dict[str, Any] = {}
@@ -406,6 +418,12 @@ class MongoRepository:
             updates["metrics"] = metrics
         if record_count is not None:
             updates["record_count"] = record_count
+        if data_source_id is not None:
+            updates["data_source_id"] = data_source_id
+        if project_key is not None:
+            updates["project_key"] = project_key
+        if repo_name is not None:
+            updates["repo_name"] = repo_name
         if not updates:
             return self.get_output(output_id)
         doc = self.db[self.collections.outputs_collection].find_one_and_update(

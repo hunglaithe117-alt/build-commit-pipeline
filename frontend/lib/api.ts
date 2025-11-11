@@ -53,6 +53,9 @@ export type SonarRun = {
 export type OutputDataset = {
   id: string;
   job_id: string;
+  data_source_id?: string | null;
+  project_key?: string | null;
+  repo_name?: string | null;
   path: string;
   record_count: number;
   metrics: string[];

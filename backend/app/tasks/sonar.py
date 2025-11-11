@@ -164,42 +164,60 @@ def export_metrics(
         commit_sha = parts[1] if len(parts) > 1 else None
 
     exporter = MetricsExporter.from_instance(instance)
-    
+
     # Use project_key for filename so all commits of same repo go to same file
     destination = Path(settings.paths.exports) / f"{project_key}_metrics.csv"
-    
+
     # Append this commit's metrics to the CSV
     measures = exporter.append_commit_metrics(component_key, destination, commit_sha)
-    
+
     if not measures:
         logger.warning(f"No measures exported for {component_key}")
         return str(destination)
-    
+
     # Count total records in the CSV file
     record_count = 0
     if destination.exists():
         with destination.open("r", encoding="utf-8") as f:
-            record_count = sum(1 for _ in f) - 1  # Subtract header row
-    
+            record_count = max(sum(1 for _ in f) - 1, 0)
+
+    repo_name: Optional[str] = None
+    data_source = repository.get_data_source(target_ds) if target_ds else None
+    if data_source:
+        stats = data_source.get("stats") or {}
+        repo_name = stats.get("project_name") or data_source.get("name")
+
     # Create or update output record
     if target_job_id:
         existing_output = repository.find_output_by_job_and_path(target_job_id, str(destination))
         if existing_output:
             # Update existing output with new record count
-            repository.update_output(
-                existing_output["id"],
-                metrics=list(measures.keys()),
-                record_count=record_count,
-            )
+            update_kwargs = {
+                "metrics": list(measures.keys()),
+                "record_count": record_count,
+                "project_key": project_key,
+            }
+            resolved_repo_name = repo_name or existing_output.get("repo_name")
+            if resolved_repo_name:
+                update_kwargs["repo_name"] = resolved_repo_name
+            if target_ds:
+                update_kwargs["data_source_id"] = target_ds
+            repository.update_output(existing_output["id"], **update_kwargs)
         else:
             # Create new output record
-            repository.add_output(
-                job_id=target_job_id,
-                path=str(destination),
-                metrics=list(measures.keys()),
-                record_count=record_count,
-            )
-    
+            add_kwargs = {
+                "job_id": target_job_id,
+                "path": str(destination),
+                "metrics": list(measures.keys()),
+                "record_count": record_count,
+                "project_key": project_key,
+            }
+            if target_ds:
+                add_kwargs["data_source_id"] = target_ds
+            if repo_name:
+                add_kwargs["repo_name"] = repo_name
+            repository.add_output(**add_kwargs)
+
     if target_ds:
         repository.upsert_sonar_run(
             data_source_id=target_ds,
@@ -213,6 +231,6 @@ def export_metrics(
             sonar_instance=instance.name,
             sonar_host=instance.host,
         )
-    
+
     logger.info("Metrics for %s appended to %s (total records: %d)", component_key, destination, record_count)
     return str(destination)
