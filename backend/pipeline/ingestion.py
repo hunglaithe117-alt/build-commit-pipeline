@@ -36,6 +36,7 @@ class CSVIngestionPipeline:
     def __init__(self, csv_path: Path) -> None:
         self.csv_path = Path(csv_path)
         self.encoding = settings.pipeline.csv_encoding
+        self.default_project_key = self.csv_path.stem
 
     def _load_rows(self) -> Iterator[Dict[str, str]]:
         with self.csv_path.open("r", encoding=self.encoding, newline="") as handle:
@@ -51,6 +52,11 @@ class CSVIngestionPipeline:
             return None
         value = value.strip()
         return value or None
+
+    def _derive_project_key(self, repo_slug: Optional[str]) -> str:
+        if repo_slug:
+            return repo_slug.replace("/", "_")
+        return self.default_project_key
 
     def summarise(self) -> Dict[str, Optional[str] | int]:
         total_builds = 0
@@ -77,9 +83,10 @@ class CSVIngestionPipeline:
                 repo_url = f"https://github.com/{repo_slug}.git"
 
         unique_commits = list(dict.fromkeys(commits))
+        primary_repo = project_name
         return {
             "project_name": project_name,
-            "project_key": (list(repos)[0].replace("/", "_", 1)),
+            "project_key": self._derive_project_key(primary_repo),
             "total_builds": total_builds,
             "total_commits": len(unique_commits),
             "unique_branches": len(branches),
@@ -97,8 +104,9 @@ class CSVIngestionPipeline:
             repo_url = None
             if not repo_url and repo_slug:
                 repo_url = f"https://github.com/{repo_slug}.git"
+            project_key = self._derive_project_key(repo_slug)
             item = CommitWorkItem(
-                project_key=self.csv_path.stem,
+                project_key=project_key,
                 repo_slug=repo_slug,
                 repository_url=repo_url,
                 commit_sha=commit,
