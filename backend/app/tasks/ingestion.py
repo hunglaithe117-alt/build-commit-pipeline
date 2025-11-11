@@ -6,8 +6,8 @@ from celery.utils.log import get_task_logger
 
 from app.celery_app import celery_app
 from app.core.config import settings
-from app.pipeline.ingestion import CSVIngestionPipeline
-from app.pipeline.sonar import get_runner_for_instance, normalize_repo_url
+from pipeline.ingestion import CSVIngestionPipeline
+from pipeline.sonar import get_runner_for_instance, normalize_repo_url
 from app.services import repository
 from app.tasks.sonar import process_commit
 

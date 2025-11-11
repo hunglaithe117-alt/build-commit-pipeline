@@ -7,7 +7,7 @@ from celery.utils.log import get_task_logger
 
 from app.celery_app import celery_app
 from app.core.config import settings
-from app.pipeline.sonar import MetricsExporter, get_runner_for_instance
+from pipeline.sonar import MetricsExporter, get_runner_for_instance
 from app.services import repository
 
 logger = get_task_logger(__name__)

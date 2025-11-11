@@ -27,6 +27,44 @@ Observability
 - `docker-compose.yml` – Khởi chạy API + worker + beat + frontend + Redis + Mongo. Mặc định mount thư mục `../sonar-scan` để tái sử dụng các script hiện có.
 - `data/` – Lưu file upload, dead-letter artifact, và CSV metrics sau khi export (được mount vào containers).
 
+## Quick start (chạy nhanh)
+
+Chạy toàn bộ stack bằng Docker (gồm API, worker, frontend, Redis, Mongo, SonarQube nếu bạn có cấu hình):
+
+```bash
+# đặt biến môi trường token SonarQube cho shell (zsh)
+export SONARQUBE_TOKEN=xxxx
+# build + up toàn bộ stack
+docker compose up --build
+```
+
+Chỉ chạy backend cục bộ (phát triển API):
+
+```bash
+cd backend
+curl -LsSf https://astral.sh/uv/install.sh | sh  # nếu chưa có uv
+uv sync --frozen --no-dev                        # tạo .venv theo lockfile
+source .venv/bin/activate
+uv run uvicorn app.main:app --reload
+# chạy celery worker trong terminal khác
+uv run celery -A app.celery_app.celery_app worker -l info
+```
+
+Frontend (cục bộ):
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+## Troubleshooting
+
+- SonarQube không gửi webhook: kiểm tra `sonarqube.webhook_secret` trong `config/pipeline.yml` và đảm bảo endpoint `http://<host>:8000/api/sonar/webhook` có thể truy cập từ SonarQube container.
+- Celery không thực thi task: kiểm tra broker (Redis) URL và rằng worker đang chạy (`uv run celery -A app.celery_app.celery_app worker -l info`).
+- Kết nối Mongo thất bại: kiểm tra chuỗi kết nối trong `config/pipeline.yml` và đảm bảo Mongo đã khởi động trước khi API kết nối.
+- SonarScanner không chạy: đảm bảo SonarScanner CLI có sẵn trên host/container và biến `SONARQUBE_TOKEN` hợp lệ.
+
 ## Chuẩn bị
 
 1. **Chạy SonarQube**: dùng `sonar-scan/docker-compose.sonarqube.yml` như bạn đã có để bật SonarQube và SonarScanner CLI.
@@ -60,8 +98,8 @@ cd build-commit-pipeline
 SONARQUBE_TOKEN=xxxx docker compose up --build
 ```
 
-- API: http://localhost:8000
-- Frontend: http://localhost:3000
+- API: <http://localhost:8000>
+- Frontend: <http://localhost:3000>
 - Mongo: mongodb://travis:travis@localhost:27017 (authSource=admin)
 - Redis: redis://localhost:6379/0
 

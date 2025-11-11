@@ -7,7 +7,7 @@ from fastapi import APIRouter, File, HTTPException, Query, UploadFile
 from fastapi.concurrency import run_in_threadpool
 
 from app.models import DataSource
-from app.pipeline.ingestion import CSVIngestionPipeline
+from pipeline.ingestion import CSVIngestionPipeline
 from app.services import file_service, repository
 from app.tasks.ingestion import ingest_data_source
 
