@@ -104,11 +104,11 @@ class SonarCommitRunner:
                 ]
             )
 
-        # Build Docker command
         docker_cmd = [
             "docker",
             "run",
             "--rm",
+            "--network=host",
             "-v",
             f"{self.repo_dir}:/usr/src",
             "sonarsource/sonar-scanner-cli",
