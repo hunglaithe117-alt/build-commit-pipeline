@@ -1,0 +1,11 @@
+fastapi==0.110.0
+uvicorn[standard]==0.27.1
+aiofiles==23.2.1
+python-multipart==0.0.9
+pydantic==2.6.4
+pyyaml==6.0.1
+pymongo==4.6.1
+celery==5.3.6
+redis==5.0.1
+requests==2.31.0
+tenacity==8.2.3

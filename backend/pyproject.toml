@@ -1,0 +1,22 @@
+[project]
+name = "build-commit-pipeline-backend"
+version = "0.1.0"
+description = "FastAPI + Celery backend for the TravisTorrent SonarQube pipeline"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi==0.110.0",
+    "uvicorn[standard]==0.27.1",
+    "aiofiles==23.2.1",
+    "python-multipart==0.0.9",
+    "pydantic==2.6.4",
+    "pyyaml==6.0.1",
+    "pymongo==4.6.1",
+    "celery==5.3.6",
+    "redis==5.0.1",
+    "requests==2.31.0",
+    "tenacity==8.2.3",
+]
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"

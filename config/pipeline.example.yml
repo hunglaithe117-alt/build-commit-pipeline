@@ -1,0 +1,50 @@
+environment: local
+paths:
+  uploads: /app/data/uploads
+  exports: /app/data/exports
+  dead_letter: /app/data/dead_letter
+  sonar_instances_config: /app/sonar-scan/sonar_instances.example.json
+  default_workdir: /app/data/sonar-work
+  travistorrent_root: /data/travistorrent
+mongo:
+  uri: mongodb://travis:travis@mongo:27017
+  database: travistorrent_pipeline
+  options:
+    authSource: admin
+redis:
+  url: redis://redis:6379/0
+  default_queue: pipeline.default
+  dead_letter_queue: pipeline.dlq
+pipeline:
+  ingestion_chunk_size: 250
+  sonar_parallelism: 4
+  resume_failed_commits: true
+  default_retry_limit: 5
+  csv_encoding: utf-8
+sonarqube:
+  host: http://localhost:9000
+  token_env: SONARQUBE_TOKEN
+  scanner_bin: sonar-scanner
+  webhook_secret: change-me
+  webhook_public_url: http://localhost:8000/api/sonar/webhook
+  measures:
+    keys:
+      - ncloc
+      - complexity
+      - cognitive_complexity
+      - coverage
+      - duplicated_lines_density
+      - vulnerabilities
+      - bugs
+      - code_smells
+      - security_hotspots_reviewed
+    chunk_size: 25
+    output_format: csv
+storage:
+  data_sources_collection: data_sources
+  jobs_collection: jobs
+  sonar_runs_collection: sonar_runs
+  dead_letter_collection: dead_letters
+  outputs_collection: outputs
+web:
+  base_url: http://localhost:3000
