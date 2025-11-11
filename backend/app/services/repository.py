@@ -93,6 +93,7 @@ class MongoRepository:
         job_type: str,
         total: int,
         status: str = "queued",
+        sonar_instance: Optional[str] = None,
     ) -> Dict[str, Any]:
         now = datetime.utcnow()
         payload = {
@@ -103,6 +104,7 @@ class MongoRepository:
             "total": total,
             "last_error": None,
             "current_commit": None,
+             "sonar_instance": sonar_instance,
             "created_at": now,
             "updated_at": now,
         }
@@ -123,6 +125,7 @@ class MongoRepository:
         last_error: Optional[str] = None,
         processed_delta: Optional[int] = None,
         current_commit: Any = _UNSET,
+        sonar_instance: Any = _UNSET,
     ) -> Optional[Dict[str, Any]]:
         set_updates: Dict[str, Any] = {"updated_at": datetime.utcnow()}
         if status:
@@ -133,6 +136,8 @@ class MongoRepository:
             set_updates["last_error"] = last_error
         if current_commit is not _UNSET:
             set_updates["current_commit"] = current_commit
+        if sonar_instance is not _UNSET:
+            set_updates["sonar_instance"] = sonar_instance
         update_doc: Dict[str, Any] = {"$set": set_updates}
         if processed_delta is not None:
             update_doc["$inc"] = {"processed": processed_delta}
@@ -142,6 +147,49 @@ class MongoRepository:
             return_document=ReturnDocument.AFTER,
         )
         return self._serialize(doc) if doc else None
+
+    def acquire_instance_lock(
+        self, instance_name: str, job_id: str, data_source_id: str
+    ) -> bool:
+        now = datetime.utcnow()
+        collection = self.db[self.collections.instance_locks_collection]
+        doc = collection.find_one_and_update(
+            {
+                "instance": instance_name,
+                "$or": [
+                    {"status": {"$exists": False}},
+                    {"status": {"$in": ["idle", "available"]}},
+                    {"job_id": job_id},
+                ],
+            },
+            {
+                "$set": {
+                    "instance": instance_name,
+                    "status": "busy",
+                    "job_id": job_id,
+                    "data_source_id": data_source_id,
+                    "updated_at": now,
+                },
+                "$setOnInsert": {"created_at": now},
+            },
+            upsert=True,
+            return_document=ReturnDocument.AFTER,
+        )
+        return bool(doc and doc.get("status") == "busy" and doc.get("job_id") == job_id)
+
+    def release_instance_lock(self, instance_name: str) -> None:
+        collection = self.db[self.collections.instance_locks_collection]
+        collection.update_one(
+            {"instance": instance_name},
+            {
+                "$set": {
+                    "status": "idle",
+                    "job_id": None,
+                    "data_source_id": None,
+                    "updated_at": datetime.utcnow(),
+                }
+            },
+        )
 
     def list_jobs(self, limit: int = 100) -> List[Dict[str, Any]]:
         cursor = (
@@ -165,28 +213,39 @@ class MongoRepository:
         log_path: Optional[str] = None,
         message: Optional[str] = None,
         component_key: Optional[str] = None,
+        sonar_instance: Optional[str] = None,
+        sonar_host: Optional[str] = None,
     ) -> Dict[str, Any]:
         now = datetime.utcnow()
         collection = self.db[self.collections.sonar_runs_collection]
+        query = {
+            "data_source_id": data_source_id,
+            "project_key": project_key,
+        }
+        if commit_sha is not None:
+            query["commit_sha"] = commit_sha
+        if component_key is not None:
+            query["component_key"] = component_key
+        set_fields: Dict[str, Any] = {
+            "status": status,
+            "analysis_id": analysis_id,
+            "metrics_path": metrics_path,
+            "commit_sha": commit_sha,
+            "job_id": job_id,
+            "log_path": log_path,
+            "message": message,
+            "component_key": component_key,
+            "finished_at": now if status in {"succeeded", "failed"} else None,
+            "updated_at": now,
+        }
+        if sonar_instance is not None:
+            set_fields["sonar_instance"] = sonar_instance
+        if sonar_host is not None:
+            set_fields["sonar_host"] = sonar_host
         doc = collection.find_one_and_update(
+            query,
             {
-                "data_source_id": data_source_id,
-                "project_key": project_key,
-                "commit_sha": commit_sha,
-            },
-            {
-                "$set": {
-                    "status": status,
-                    "analysis_id": analysis_id,
-                    "metrics_path": metrics_path,
-                    "commit_sha": commit_sha,
-                    "job_id": job_id,
-                    "log_path": log_path,
-                    "message": message,
-                    "component_key": component_key,
-                    "finished_at": now if status in {"succeeded", "failed"} else None,
-                    "updated_at": now,
-                },
+                "$set": set_fields,
                 "$setOnInsert": {"started_at": now},
             },
             upsert=True,

@@ -15,6 +15,8 @@ backend (FastAPI)
     └── Module `pipeline/sonar.py` tái hiện logic của `sonar_scan_csv_multi.py` để clone repo, checkout commit và chạy sonar-scanner
 SonarQube
     └── Khởi chạy bằng docker-compose.sonarqube.yml (thư mục sonar-scan/) và cấu hình webhook → backend
+Observability
+    └── Grafana Loki + Promtail + Grafana theo dõi stdout containers và file log trong `data/`
 ```
 
 ## Thư mục quan trọng
@@ -30,10 +32,11 @@ SonarQube
 1. **Chạy SonarQube**: dùng `sonar-scan/docker-compose.sonarqube.yml` như bạn đã có để bật SonarQube và SonarScanner CLI.
 2. **Điền config**:
    - Sao chép `config/pipeline.example.yml` thành `config/pipeline.yml` (đã thực hiện với cấu hình mặc định). Cập nhật:
-     - `paths.sonar_instances_config`: trỏ tới file JSON mô tả danh sách SonarQube instances (token, host, workdir). Có thể dùng `sonar-scan/sonar_instances.example.json` rồi chỉnh.
-     - `sonarqube.token_env` hoặc `sonarqube.token`: token có quyền quét + đọc measures.
+     - `sonarqube.instances`: danh sách SonarQube instances bạn muốn scale (host, token env, scanner bin). Worker sẽ round-robin commit qua các instance này.
+     - `sonarqube.token_env` hoặc `sonarqube.token`: giá trị mặc định nếu không khai báo `instances`.
      - `sonarqube.webhook_secret`: chuỗi bí mật để SonarQube gửi webhook.
 3. **Env**: export `SONARQUBE_TOKEN=<token>` trước khi chạy docker-compose (hoặc ghi trực tiếp vào YAML nếu thuận tiện).
+4. **Logging**: Giữ nguyên `config/promtail-config.yml` hoặc chỉnh để bổ sung đường log. Khi chạy stack nhớ bật `loki`, `promtail`, `grafana` để theo dõi log realtime.
 
 ## Backend dùng uv
 
@@ -66,7 +69,7 @@ SONARQUBE_TOKEN=xxxx docker compose up --build
 
 1. **Nguồn dữ liệu** (`/data-sources`)
    - Upload file CSV (ví dụ từ `19314170/ruby_per_project_csv`). Backend tự động tóm tắt số build/commit, tạo record trong Mongo.
-   - Bấm "Thu thập dữ liệu" để queue job Celery (`ingest_data_source`). Task này cắt CSV thành từng commit, enqueue `run_commit_scan` để chạy SonarScanner cho từng commit một cách song song.
+   - Bấm "Thu thập dữ liệu" để queue job Celery (`ingest_data_source`). Mỗi CSV sẽ được gán độc quyền cho một SonarQube instance và được xử lý tuần tự commit-by-commit cho tới khi hoàn thành.
 
 2. **Thu thập** (`/jobs`)
    - Theo dõi trạng thái job (queued/running/succeeded/failed), số commit đã xử lý / tổng và commit đang chạy. Progress bar cập nhật mỗi 5 giây với dữ liệu realtime từ Mongo.
@@ -76,6 +79,41 @@ SONARQUBE_TOKEN=xxxx docker compose up --build
 
 4. **Dữ liệu đầu ra** (`/outputs`)
    - Liệt kê các bộ metric đã được export. Có link tải nhanh `api/outputs/{id}/download`.
+
+## Scale nhiều SonarQube instance
+
+Trong `config/pipeline.yml`, bạn có thể khai báo nhiều instance:
+
+```yaml
+sonarqube:
+  default_instance: primary
+  instances:
+    - name: primary
+      host: http://sonarqube1:9000
+      token_env: SONARQUBE_TOKEN_PRIMARY
+    - name: secondary
+      host: http://sonarqube2:9000
+      token_env: SONARQUBE_TOKEN_SECONDARY
+```
+
+Mỗi commit từ CSV sẽ được gán lần lượt cho từng instance. Thông tin `sonar_instance`, `sonar_host`, commit hiện tại và log file đều được hiển thị trên giao diện `/jobs` và `/sonar-runs` để dễ theo dõi realtime.
+
+- Hệ thống sử dụng `instance_locks` trong Mongo để đảm bảo **mỗi SonarQube chỉ xử lý một CSV tại một thời điểm**. Nếu có nhiều CSV hơn số instance, các job mới sẽ tự động chờ cho tới khi một instance rảnh và Celery sẽ retry.
+- Khi một instance đã được cấp phát cho một CSV, toàn bộ commit trong file đó sẽ chạy tuần tự trên instance đó cho tới khi hoàn thành (hoặc lỗi). Điều này giúp bạn dễ dàng scale “2 SonarQube = 2 CSV chạy song song”.
+
+## Observability (Grafana + Loki)
+
+- `docker-compose.yml` bổ sung 3 dịch vụ:
+  - `loki` (port 3100) lưu trữ log.
+  - `promtail` tail stdout của Docker (`/var/lib/docker/containers/*`) và các file log trong `data/` (như `sonar-work/*/logs/*.log`, `dead_letter/*.json`, `error_logs/*.log`) theo cấu hình `config/promtail-config.yml`.
+  - `grafana` (port 3001, admin/admin) để trực quan hóa.
+- Sau khi `docker compose up -d loki promtail grafana`, vào Grafana → add data source → Loki (`http://loki:3100`).
+- Các nhãn log quan trọng:
+  - `job="docker-containers"`: log stdout của API, Celery worker/beat, frontend, Redis, Mongo, SonarQube, v.v.
+  - `job="sonar-commit-logs"`: log từng commit (`data/sonar-work/<instance>/<project>/logs/*.log`).
+  - `job="dead-letter"`: JSON payload commit lỗi trong `data/dead_letter`.
+  - `job="pipeline-error-files"`: file `data/error_logs/*.log`.
+- Nếu muốn bổ sung đường log khác (ví dụ upload tiến độ), chỉnh `config/promtail-config.yml` và reload Promtail.
 
 ## Hook SonarQube webhook
 
@@ -91,7 +129,7 @@ SONARQUBE_TOKEN=xxxx docker compose up --build
 
 ## Tích hợp script hiện tại
 
-- **Scanning**: `pipeline/sonar.py` chuyển logic từ `sonar-scan/sonar_scan_csv_multi.py` vào Python module. Mỗi commit trong CSV được queue thành task `run_commit_scan`, clone repo, checkout commit và chạy `sonar-scanner`.
+- **Scanning**: `pipeline/sonar.py` chuyển logic từ `sonar-scan/sonar_scan_csv_multi.py` vào Python module. Một SonarCommitRunner được tạo cho từng instance và CSV; runner clone repo, checkout từng commit tuần tự và chạy `sonar-scanner`.
 - **Metrics export**: `pipeline/sonar.py::MetricsExporter` lấy cảm hứng từ `sonar-scan/batch_fetch_all_measures.py`, nhưng gói gọn cho từng project key, chunk metric theo YAML.
 - Nếu muốn chạy hàng loạt, chỉ cần đặt nhiều file CSV trong thư mục `data/uploads/` rồi queue nhiều data source.
 

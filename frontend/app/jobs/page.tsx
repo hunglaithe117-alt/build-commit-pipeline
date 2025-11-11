@@ -33,6 +33,7 @@ export default function JobsPage() {
             <th>Số commit xử lý</th>
             <th>Tổng commit</th>
             <th>Commit đang chạy</th>
+            <th>Sonar Instance</th>
             <th>Tiến độ</th>
             <th>Trạng thái</th>
           </tr>
@@ -46,6 +47,7 @@ export default function JobsPage() {
                 <td>{job.processed}</td>
                 <td>{job.total}</td>
                 <td style={{ fontFamily: "monospace" }}>{job.current_commit || "-"}</td>
+                <td>{job.sonar_instance || "-"}</td>
                 <td>
                   <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
                     <div

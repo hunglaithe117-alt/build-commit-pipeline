@@ -26,6 +26,8 @@ export default function SonarRunsPage() {
             <th>Project key</th>
             <th>Commit</th>
             <th>Component</th>
+            <th>Instance</th>
+            <th>Host</th>
             <th>Analysis ID</th>
             <th>Trạng thái</th>
             <th>Bắt đầu</th>
@@ -40,6 +42,8 @@ export default function SonarRunsPage() {
               <td>{run.project_key}</td>
               <td style={{ fontFamily: "monospace" }}>{run.commit_sha || "-"}</td>
               <td>{run.component_key || "-"}</td>
+              <td>{run.sonar_instance || "-"}</td>
+              <td>{run.sonar_host || "-"}</td>
               <td>{run.analysis_id || "-"}</td>
               <td>
                 <StatusBadge value={run.status} />

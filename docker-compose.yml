@@ -96,8 +96,6 @@ services:
       - sonarqube1_logs:/opt/sonarqube/logs
     ports:
       - "9001:9000"
-    networks:
-      - sonar-net
 
   sonarqube2:
     image: sonarqube:latest
@@ -113,8 +111,7 @@ services:
       - sonarqube2_logs:/opt/sonarqube/logs
     ports:
       - "9002:9000"
-    networks:
-      - sonar-net
+  
   db:
     image: postgres:15-alpine
     container_name: sonar_db
@@ -124,8 +121,43 @@ services:
       POSTGRES_DB: sonar
     volumes:
       - postgres_data:/var/lib/postgresql/data
-    networks:
-      - sonar-net
+
+  loki:
+    image: grafana/loki:2.9.3
+    container_name: loki
+    command: -config.file=/etc/loki/local-config.yaml
+    ports:
+      - "3100:3100"
+    volumes:
+      - loki_data:/loki
+
+  promtail:
+    image: grafana/promtail:2.9.3
+    container_name: promtail
+    command: -config.file=/etc/promtail/config.yml
+    volumes:
+      - ./config/promtail-config.yml:/etc/promtail/config.yml:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./data:/var/pipeline-data:ro
+    depends_on:
+      - loki
+
+  grafana:
+    image: grafana/grafana:10.2.3
+    container_name: grafana
+    restart: unless-stopped
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_INSTALL_PLUGINS=grafana-loki-datasource
+    ports:
+      - "3001:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
+    depends_on:
+      - loki
+
 volumes:
   mongo_data:
   postgres_data:
@@ -135,3 +167,5 @@ volumes:
   sonarqube2_data:
   sonarqube2_extensions:
   sonarqube2_logs:
+  grafana_data:
+  loki_data:

@@ -52,6 +52,7 @@ class Job(BaseModel):
     total: int = 0
     last_error: Optional[str] = None
     current_commit: Optional[str] = None
+    sonar_instance: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 
@@ -69,6 +70,8 @@ class SonarRun(BaseModel):
     commit_sha: Optional[str] = None
     job_id: Optional[str] = None
     component_key: Optional[str] = None
+    sonar_instance: Optional[str] = None
+    sonar_host: Optional[str] = None
     analysis_id: Optional[str] = None
     status: str
     started_at: datetime

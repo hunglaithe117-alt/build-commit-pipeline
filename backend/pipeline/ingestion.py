@@ -7,24 +7,9 @@ from typing import Dict, Iterable, Iterator, List, Optional
 
 from app.core.config import settings
 
-PROJECT_FIELDS = [
-    "gh_project_name",
-    "gh_project",
-    "repository_slug",
-    "github_slug",
-    "project",
-]
-
-COMMIT_FIELDS = [
-    "git_trigger_commit",
-    "git_commit",
-    "commit",
-    "sha",
-    "git_sha",
-]
-
-BRANCH_FIELDS = ["git_trigger_branch", "branch", "git_branch"]
-REPO_URL_FIELDS = ["gh_project_url", "repo", "repository"]
+REPO_COLUMN = "gh_project_name"
+COMMIT_COLUMN = "git_trigger_commit"
+BRANCH_COLUMN = "git_branch"
 
 
 @dataclass
@@ -61,14 +46,11 @@ class CSVIngestionPipeline:
                 yield row
 
     @staticmethod
-    def _first_value(row: Dict[str, str], keys: List[str]) -> Optional[str]:
-        for key in keys:
-            value = row.get(key)
-            if value:
-                value = value.strip()
-                if value:
-                    return value
-        return None
+    def _clean(value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        value = value.strip()
+        return value or None
 
     def summarise(self) -> Dict[str, Optional[str] | int]:
         total_builds = 0
@@ -79,17 +61,20 @@ class CSVIngestionPipeline:
 
         for row in self._load_rows():
             total_builds += 1
-            commit = self._first_value(row, COMMIT_FIELDS)
+            commit = self._clean(row.get(COMMIT_COLUMN))
             if commit:
                 commits.append(commit)
-            slug = self._first_value(row, PROJECT_FIELDS)
+            slug = self._clean(row.get(REPO_COLUMN))
             if slug:
                 repos.add(slug)
                 project_name = project_name or slug
-            branch = self._first_value(row, BRANCH_FIELDS)
+            branch = self._clean(row.get(BRANCH_COLUMN))
             if branch:
                 branches.add(branch)
-            repo_url = self._first_value(row, REPO_URL_FIELDS)
+            repo_slug = slug
+            repo_url = None
+            if not repo_url and repo_slug:
+                repo_url = f"https://github.com/{repo_slug}.git"
             if repo_url:
                 repos.add(repo_url)
 
@@ -108,15 +93,19 @@ class CSVIngestionPipeline:
     def iter_commit_chunks(self, chunk_size: int) -> Iterable[List[CommitWorkItem]]:
         chunk: List[CommitWorkItem] = []
         for row in self._load_rows():
-            commit = self._first_value(row, COMMIT_FIELDS)
+            commit = self._clean(row.get(COMMIT_COLUMN))
             if not commit:
                 continue
+            repo_slug = self._clean(row.get(REPO_COLUMN))
+            repo_url = None
+            if not repo_url and repo_slug:
+                repo_url = f"https://github.com/{repo_slug}.git"
             item = CommitWorkItem(
                 project_key=self.csv_path.stem,
-                repo_slug=self._first_value(row, PROJECT_FIELDS),
-                repository_url=self._first_value(row, REPO_URL_FIELDS),
+                repo_slug=repo_slug,
+                repository_url=repo_url,
                 commit_sha=commit,
-                branch=self._first_value(row, BRANCH_FIELDS),
+                branch=self._clean(row.get(BRANCH_COLUMN)),
             )
             chunk.append(item)
             if len(chunk) >= chunk_size:

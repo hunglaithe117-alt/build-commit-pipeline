@@ -28,6 +28,7 @@ export type Job = {
   total: number;
   last_error?: string | null;
   current_commit?: string | null;
+  sonar_instance?: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -39,6 +40,8 @@ export type SonarRun = {
   commit_sha?: string | null;
   job_id?: string | null;
   component_key?: string | null;
+  sonar_instance?: string | null;
+  sonar_host?: string | null;
   status: string;
   analysis_id?: string | null;
   metrics_path?: string | null;

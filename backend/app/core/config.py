@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 import os
 
 import yaml
@@ -46,6 +46,29 @@ class SonarMeasures(BaseModel):
     output_format: str = Field(default="csv")
 
 
+class SonarInstanceSettings(BaseModel):
+    name: str
+    host: str
+    token_env: Optional[str] = Field(default=None)
+    token: Optional[str] = Field(default=None)
+    scanner_bin: Optional[str] = Field(default=None)
+
+    def resolved_token(self) -> str:
+        if self.token:
+            return self.token
+        if self.token_env:
+            token = os.getenv(self.token_env, "")
+            if token:
+                return token
+        raise RuntimeError(
+            f"SonarQube token missing for instance '{self.name}'. "
+            "Configure `token` or `token_env`."
+        )
+
+    def resolved_scanner(self, fallback: str) -> str:
+        return self.scanner_bin or fallback
+
+
 class SonarSettings(BaseModel):
     host: str = Field(default="http://localhost:9000")
     token_env: Optional[str] = Field(default="SONARQUBE_TOKEN")
@@ -54,6 +77,34 @@ class SonarSettings(BaseModel):
     webhook_secret: str = Field(default="change-me")
     webhook_public_url: str = Field(default="http://localhost:8000/api/sonar/webhook")
     measures: SonarMeasures = Field(default_factory=SonarMeasures)
+    instances: List[SonarInstanceSettings] = Field(default_factory=list)
+    default_instance: Optional[str] = None
+
+    def get_instances(self) -> List[SonarInstanceSettings]:
+        if self.instances:
+            return self.instances
+        return [
+            SonarInstanceSettings(
+                name="default",
+                host=self.host,
+                token=self.token,
+                token_env=self.token_env,
+                scanner_bin=self.scanner_bin,
+            )
+        ]
+
+    def get_instance(self, name: Optional[str] = None) -> SonarInstanceSettings:
+        instances = self.get_instances()
+        if name:
+            for instance in instances:
+                if instance.name == name:
+                    return instance
+            raise ValueError(f"Sonar instance '{name}' is not configured.")
+        if self.default_instance:
+            for instance in instances:
+                if instance.name == self.default_instance:
+                    return instance
+        return instances[0]
 
 
 class StorageCollections(BaseModel):
@@ -62,6 +113,7 @@ class StorageCollections(BaseModel):
     sonar_runs_collection: str = Field(default="sonar_runs")
     dead_letter_collection: str = Field(default="dead_letters")
     outputs_collection: str = Field(default="outputs")
+    instance_locks_collection: str = Field(default="instance_locks")
 
 
 class WebSettings(BaseModel):
@@ -80,15 +132,8 @@ class Settings(BaseModel):
 
     @property
     def sonar_token(self) -> str:
-        if self.sonarqube.token:
-            return self.sonarqube.token
-        if self.sonarqube.token_env:
-            token = os.getenv(self.sonarqube.token_env, "")
-            if token:
-                return token
-        raise RuntimeError(
-            "SonarQube token is not configured. Set sonarqube.token or SONARQUBE_TOKEN."
-        )
+        instance = self.sonarqube.get_instance()
+        return instance.resolved_token()
 
 
 def _load_yaml(path: Path) -> Dict[str, Any]:

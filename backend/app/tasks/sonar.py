@@ -1,26 +1,31 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict, Optional, Tuple
 
 from celery.utils.log import get_task_logger
 
 from app.celery_app import celery_app
 from app.core.config import settings
-from app.pipeline.sonar import MetricsExporter, SonarCommitRunner
+from app.pipeline.sonar import MetricsExporter, get_runner_for_instance
 from app.services import repository
 
 logger = get_task_logger(__name__)
 
 
-@celery_app.task(bind=True, autoretry_for=(Exception,), retry_backoff=True, retry_kwargs={"max_retries": 2})
-def run_commit_scan(self, job_id: str, data_source_id: str, commit: Dict[str, str]) -> str:
+def process_commit(
+    job_id: str,
+    data_source_id: str,
+    commit: Dict[str, str],
+    runner,
+) -> Tuple[str, bool]:
     commit_sha = commit.get("commit_sha")
     project_key = commit.get("project_key")
     repo_url = commit.get("repo_url")
     if not all([commit_sha, project_key, repo_url]):
         raise ValueError("Commit payload missing mandatory fields.")
 
+    instance = runner.instance
     component_key = f"{project_key}_{commit_sha}"
     repository.update_job(job_id, status="running", current_commit=commit_sha)
     repository.upsert_sonar_run(
@@ -30,8 +35,9 @@ def run_commit_scan(self, job_id: str, data_source_id: str, commit: Dict[str, st
         job_id=job_id,
         status="running",
         component_key=component_key,
+        sonar_instance=instance.name,
+        sonar_host=instance.host,
     )
-    runner = SonarCommitRunner(project_key)
     try:
         result = runner.scan_commit(
             repo_url=repo_url,
@@ -47,6 +53,8 @@ def run_commit_scan(self, job_id: str, data_source_id: str, commit: Dict[str, st
             job_id=job_id,
             status="failed",
             message=message,
+            sonar_instance=instance.name,
+            sonar_host=instance.host,
         )
         repository.update_job(
             job_id,
@@ -62,27 +70,69 @@ def run_commit_scan(self, job_id: str, data_source_id: str, commit: Dict[str, st
         logger.exception("Commit %s failed", commit_sha)
         raise
 
-    repository.upsert_sonar_run(
-        data_source_id=data_source_id,
-        project_key=project_key,
-        commit_sha=commit_sha,
-        job_id=job_id,
-        status="submitted",
-        log_path=str(result.log_path),
-        component_key=result.component_key,
-    )
+    if result.skipped:
+        repository.upsert_sonar_run(
+            data_source_id=data_source_id,
+            project_key=project_key,
+            commit_sha=commit_sha,
+            job_id=job_id,
+            status="skipped",
+            log_path=str(result.log_path),
+            message=result.output,
+            component_key=result.component_key,
+            sonar_instance=result.instance_name,
+            sonar_host=instance.host,
+        )
+    else:
+        repository.upsert_sonar_run(
+            data_source_id=data_source_id,
+            project_key=project_key,
+            commit_sha=commit_sha,
+            job_id=job_id,
+            status="submitted",
+            log_path=str(result.log_path),
+            component_key=result.component_key,
+            sonar_instance=result.instance_name,
+            sonar_host=instance.host,
+        )
 
     updated_job = repository.update_job(
         job_id,
         processed_delta=1,
         current_commit=None,
     )
-    if updated_job and updated_job.get("processed", 0) >= updated_job.get("total", 0):
+    job_finished = bool(
+        updated_job and updated_job.get("processed", 0) >= updated_job.get("total", 0)
+    )
+    if job_finished:
         repository.update_job(job_id, status="succeeded")
         repository.update_data_source(data_source_id, status="ready")
 
-    logger.info("Submitted commit %s for analysis (component %s)", commit_sha, result.component_key)
-    return result.component_key
+    logger.info(
+        "Processed commit %s on %s (component %s)",
+        commit_sha,
+        instance.name,
+        result.component_key,
+    )
+    return result.component_key, job_finished
+
+
+@celery_app.task(bind=True, autoretry_for=(Exception,), retry_backoff=True, retry_kwargs={"max_retries": 3})
+def run_commit_scan(self, job_id: str, data_source_id: str, commit: Dict[str, str]) -> str:
+    project_key = commit.get("project_key")
+    if not project_key:
+        raise ValueError("Commit payload missing project_key")
+    instance_name = commit.get("sonar_instance")
+    runner = get_runner_for_instance(project_key, instance_name)
+    job_finished = False
+    try:
+        component_key, job_finished = process_commit(job_id, data_source_id, commit, runner)
+    except Exception:
+        repository.release_instance_lock(runner.instance.name)
+        raise
+    if job_finished:
+        repository.release_instance_lock(runner.instance.name)
+    return component_key
 
 
 @celery_app.task(bind=True, autoretry_for=(Exception,), retry_backoff=True, retry_kwargs={"max_retries": 3})
@@ -93,26 +143,36 @@ def export_metrics(
     data_source_id: Optional[str] = None,
     analysis_id: Optional[str] = None,
 ) -> str:
-    exporter = MetricsExporter()
+    run_doc = repository.find_sonar_run_by_component(project_key)
+    if run_doc:
+        instance = settings.sonarqube.get_instance(run_doc.get("sonar_instance"))
+        target_job_id = job_id or run_doc.get("job_id") or "ad-hoc"
+        target_ds = data_source_id or run_doc.get("data_source_id")
+    else:
+        instance = settings.sonarqube.get_instance()
+        target_job_id = job_id or "ad-hoc"
+        target_ds = data_source_id
+    exporter = MetricsExporter.from_instance(instance)
     destination = Path(settings.paths.exports) / f"{project_key}_metrics.csv"
     measures = exporter.export_project(project_key, destination)
     repository.add_output(
-        job_id=job_id or "ad-hoc",
+        job_id=target_job_id,
         path=str(destination),
         metrics=list(measures.keys()),
         record_count=1,
     )
-    if data_source_id:
-        run_doc = repository.find_sonar_run_by_component(project_key) or {}
+    if target_ds:
         repository.upsert_sonar_run(
-            data_source_id=data_source_id,
-            project_key=run_doc.get("project_key", project_key),
-            commit_sha=run_doc.get("commit_sha"),
-            job_id=run_doc.get("job_id") or job_id,
+            data_source_id=target_ds,
+            project_key=run_doc.get("project_key", project_key) if run_doc else project_key,
+            commit_sha=run_doc.get("commit_sha") if run_doc else None,
+            job_id=target_job_id,
             status="succeeded",
             analysis_id=analysis_id,
             metrics_path=str(destination),
             component_key=project_key,
+            sonar_instance=instance.name,
+            sonar_host=instance.host,
         )
     logger.info("Metrics exported to %s", destination)
     return str(destination)
