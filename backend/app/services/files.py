@@ -22,7 +22,6 @@ class LocalFileService:
         self.dead_letter_dir.mkdir(parents=True, exist_ok=True)
 
     async def save_upload(self, upload: UploadFile) -> Path:
-        suffix = Path(upload.filename or "dataset.csv").suffix or ".csv"
         target = self.upload_dir / f"{uuid.uuid4()}_{upload.filename}"
         async with aiofiles.open(target, "wb") as out_file:
             while chunk := await upload.read(1024 * 1024):

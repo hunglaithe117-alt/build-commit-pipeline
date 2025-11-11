@@ -50,19 +50,13 @@ class SonarMeasures(BaseModel):
 class SonarInstanceSettings(BaseModel):
     name: str
     host: str
-    token_env: Optional[str] = Field(default=None)
     token: Optional[str] = Field(default=None)
 
     def resolved_token(self) -> str:
         if self.token:
             return self.token
-        if self.token_env:
-            token = os.getenv(self.token_env, "")
-            if token:
-                return token
         raise RuntimeError(
-            f"SonarQube token missing for instance '{self.name}'. "
-            "Configure `token` or `token_env`."
+            f"SonarQube token missing for instance '{self.name}'. " "Configure `token`."
         )
 
 
@@ -127,7 +121,7 @@ def _config_path() -> Path:
     env_path = os.getenv("PIPELINE_CONFIG")
     if env_path:
         return Path(env_path).expanduser().resolve()
-    return Path(__file__).resolve().parents[2] / "config" / "pipeline.yml"
+    return Path(__file__).resolve().parents[3] / "config" / "pipeline.yml"
 
 
 @lru_cache(maxsize=1)
