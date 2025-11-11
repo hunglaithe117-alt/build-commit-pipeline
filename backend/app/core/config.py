@@ -61,7 +61,6 @@ class SonarInstanceSettings(BaseModel):
 
 
 class SonarSettings(BaseModel):
-    scanner_bin: str = Field(default="sonar-scanner")
     webhook_secret: str = Field(default="change-me")
     webhook_public_url: str = Field(default="http://localhost:8000/api/sonar/webhook")
     measures: SonarMeasures = Field(default_factory=SonarMeasures)

@@ -22,7 +22,6 @@ pipeline:
   default_retry_limit: 5
   csv_encoding: utf-8
 sonarqube:
-  scanner_bin: sonar-scanner
   webhook_secret: change-me
   webhook_public_url: http://localhost:8000/api/sonar/webhook
   instances:

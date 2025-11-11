@@ -67,7 +67,6 @@ class SonarCommitRunner:
         self.logs_dir = self.work_dir / "logs"
         self.work_dir.mkdir(parents=True, exist_ok=True)
         self.logs_dir.mkdir(parents=True, exist_ok=True)
-        self.scanner_bin = settings.sonarqube.scanner_bin
         self.host = self.instance.host.rstrip("/")
         self.token = self.instance.resolved_token()
         self.session = requests.Session()
@@ -87,24 +86,36 @@ class SonarCommitRunner:
         run_command(["git", "clean", "-fdx"], cwd=self.repo_dir, allow_fail=True)
 
     def build_scan_command(self, component_key: str, project_type: str) -> List[str]:
-        base_cmd = [
-            self.scanner_bin,
+        scanner_args = [
             f"-Dsonar.projectKey={component_key}",
             f"-Dsonar.projectName={self.project_key}",
             "-Dsonar.sources=.",
             f"-Dsonar.host.url={self.host}",
-            f"-Dsonar.login={self.token}",
+            f"-Dsonar.token={self.token}",
             "-Dsonar.sourceEncoding=UTF-8",
             "-Dsonar.exclusions=**/test/**,**/tests/**,**/spec/**,**/features/**,**/tmp/**,**/vendor/**,**/node_modules/**",
         ]
+
         if project_type == "ruby":
-            base_cmd.extend(
+            scanner_args.extend(
                 [
                     "-Dsonar.language=ruby",
                     "-Dsonar.java.binaries=target/classes",
                 ]
             )
-        return base_cmd
+
+        # Build Docker command
+        docker_cmd = [
+            "docker",
+            "run",
+            "--rm",
+            "-v",
+            f"{self.repo_dir}:/usr/src",
+            "sonarsource/sonar-scanner-cli",
+        ]
+        docker_cmd.extend(scanner_args)
+
+        return docker_cmd
 
     def project_exists(self, component_key: str) -> bool:
         url = f"{self.host}/api/projects/search"
