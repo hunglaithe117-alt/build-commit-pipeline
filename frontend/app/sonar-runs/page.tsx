@@ -1,9 +1,13 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { ColumnDef } from "@tanstack/react-table";
+import { useEffect, useMemo, useState } from "react";
 
-import { api, SonarRun } from "../../lib/api";
-import { StatusBadge } from "../../components/StatusBadge";
+import { StatusBadge } from "@/components/StatusBadge";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { DataTable } from "@/components/ui/data-table";
+import { Input } from "@/components/ui/input";
+import { api, SonarRun } from "@/lib/api";
 
 export default function SonarRunsPage() {
   const [runs, setRuns] = useState<SonarRun[]>([]);
@@ -16,72 +20,115 @@ export default function SonarRunsPage() {
       .catch((err) => setError(err.message));
   }, []);
 
+  const statusOptions = useMemo(() => Array.from(new Set(runs.map((item) => item.status))).sort(), [runs]);
+
+  const columns = useMemo<ColumnDef<SonarRun>[]>(() => {
+    return [
+      {
+        accessorKey: "project_key",
+        header: "Project key",
+        cell: ({ row }) => <span className="font-medium">{row.original.project_key}</span>,
+      },
+      {
+        accessorKey: "commit_sha",
+        header: "Commit",
+        cell: ({ row }) => <span className="font-mono text-xs">{row.original.commit_sha || "-"}</span>,
+      },
+      {
+        accessorKey: "component_key",
+        header: "Component",
+        cell: ({ row }) => <span className="whitespace-nowrap">{row.original.component_key || "-"}</span>,
+      },
+      {
+        accessorKey: "sonar_instance",
+        header: "Instance",
+        cell: ({ row }) => row.original.sonar_instance || "-",
+      },
+      {
+        accessorKey: "sonar_host",
+        header: "Host",
+        cell: ({ row }) => <span className="whitespace-nowrap">{row.original.sonar_host || "-"}</span>,
+      },
+      {
+        accessorKey: "analysis_id",
+        header: "Analysis ID",
+        cell: ({ row }) => <span className="font-mono text-xs">{row.original.analysis_id || "-"}</span>,
+      },
+      {
+        accessorKey: "status",
+        header: "Trạng thái",
+        cell: ({ row }) => <StatusBadge value={row.original.status} />,
+      },
+      {
+        accessorKey: "started_at",
+        header: "Bắt đầu",
+        cell: ({ row }) => (
+          <span className="whitespace-nowrap text-xs">{new Date(row.original.started_at).toLocaleString()}</span>
+        ),
+      },
+      {
+        accessorKey: "finished_at",
+        header: "Kết thúc",
+        cell: ({ row }) => (
+          <span className="whitespace-nowrap text-xs">
+            {row.original.finished_at ? new Date(row.original.finished_at).toLocaleString() : "-"}
+          </span>
+        ),
+      },
+      {
+        accessorKey: "metrics_path",
+        header: "Metrics",
+        cell: ({ row }) => <span className="max-w-[200px] truncate text-xs">{row.original.metrics_path || "-"}</span>,
+      },
+      {
+        accessorKey: "log_path",
+        header: "Log",
+        cell: ({ row }) => <span className="max-w-[200px] truncate text-xs">{row.original.log_path || "-"}</span>,
+      },
+    ];
+  }, []);
+
   return (
-    <section className="card">
-      <h2>Lịch sử quét SonarQube</h2>
-      {error && <p style={{ color: "#ef4444" }}>{error}</p>}
-      <div style={{ overflowX: "auto" }}>
-        <table className="table" style={{ minWidth: 960, tableLayout: "auto" }}>
-          <thead>
-            <tr>
-              <th>Project key</th>
-              <th>Commit</th>
-              <th>Component</th>
-              <th>Instance</th>
-              <th>Host</th>
-              <th>Analysis ID</th>
-              <th>Trạng thái</th>
-              <th>Bắt đầu</th>
-              <th>Kết thúc</th>
-              <th>Metrics</th>
-              <th>Log</th>
-            </tr>
-          </thead>
-          <tbody>
-            {runs.map((run) => (
-              <tr key={run.id}>
-                <td>{run.project_key}</td>
-                <td style={{ fontFamily: "monospace", whiteSpace: "nowrap" }}>
-                  {run.commit_sha || "-"}
-                </td>
-                <td style={{ whiteSpace: "nowrap" }}>{run.component_key || "-"}</td>
-                <td>{run.sonar_instance || "-"}</td>
-                <td style={{ whiteSpace: "nowrap" }}>{run.sonar_host || "-"}</td>
-                <td style={{ whiteSpace: "nowrap" }}>{run.analysis_id || "-"}</td>
-                <td>
-                  <StatusBadge value={run.status} />
-                </td>
-                <td style={{ whiteSpace: "nowrap" }}>
-                  {new Date(run.started_at).toLocaleString()}
-                </td>
-                <td style={{ whiteSpace: "nowrap" }}>
-                  {run.finished_at ? new Date(run.finished_at).toLocaleString() : "-"}
-                </td>
-                <td
-                  style={{
-                    maxWidth: 200,
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
-                    whiteSpace: "nowrap",
-                  }}
-                >
-                  {run.metrics_path ? run.metrics_path : "-"}
-                </td>
-                <td
-                  style={{
-                    maxWidth: 200,
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
-                    whiteSpace: "nowrap",
-                  }}
-                >
-                  {run.log_path ? run.log_path : "-"}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+    <section>
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-xl">Lịch sử quét SonarQube</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {error && <p className="mb-4 text-sm text-destructive">{error}</p>}
+          <DataTable
+            pageSize={50}
+            columns={columns}
+            data={runs}
+            emptyMessage="Chưa có Sonar run nào."
+            renderToolbar={(table) => (
+              <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                <Input
+                  className="md:max-w-xs"
+                  placeholder="Lọc theo project..."
+                  value={(table.getColumn("project_key")?.getFilterValue() as string) ?? ""}
+                  onChange={(event) => table.getColumn("project_key")?.setFilterValue(event.target.value)}
+                />
+                <div className="flex items-center gap-2">
+                  <span className="text-sm text-muted-foreground">Trạng thái</span>
+                  <select
+                    className="h-10 rounded-md border border-input bg-background px-3 text-sm"
+                    value={(table.getColumn("status")?.getFilterValue() as string) ?? ""}
+                    onChange={(event) => table.getColumn("status")?.setFilterValue(event.target.value || undefined)}
+                  >
+                    <option value="">Tất cả</option>
+                    {statusOptions.map((status) => (
+                      <option key={status} value={status}>
+                        {status}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+            )}
+          />
+        </CardContent>
+      </Card>
     </section>
   );
 }

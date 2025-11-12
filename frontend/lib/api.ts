@@ -8,6 +8,13 @@ export type CSVSummary = {
   last_commit?: string | null;
 };
 
+export type SonarConfig = {
+  content: string;
+  source: string;
+  filename?: string | null;
+  updated_at?: string;
+};
+
 export type DataSource = {
   id: string;
   name: string;
@@ -17,6 +24,7 @@ export type DataSource = {
   stats?: CSVSummary;
   created_at: string;
   updated_at: string;
+  sonar_config?: SonarConfig | null;
 };
 
 export type Job = {
@@ -62,6 +70,18 @@ export type OutputDataset = {
   created_at: string;
 };
 
+export type DeadLetter = {
+  id: string;
+  payload: Record<string, any>;
+  reason: string;
+  status: string;
+  config_override?: string | null;
+  config_source?: string | null;
+  created_at: string;
+  updated_at?: string | null;
+  resolved_at?: string | null;
+};
+
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
 
 async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
@@ -81,10 +101,25 @@ async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
 
 export const api = {
   listDataSources: () => apiFetch<DataSource[]>("/api/data-sources"),
-  uploadDataSource: async (file: File, name: string) => {
+  getDataSource: (id: string) => apiFetch<DataSource>(`/api/data-sources/${id}`),
+  uploadDataSource: async (
+    file: File,
+    name: string,
+    options?: { configContent?: string; configSource?: string; configFilename?: string }
+  ) => {
     const formData = new FormData();
+    formData.append("name_form", name);
     formData.append("file", file);
-    const response = await fetch(`${API_BASE_URL}/api/data-sources?name=${encodeURIComponent(name)}`, {
+    if (options?.configContent) {
+      formData.append("sonar_config_content", options.configContent);
+      if (options.configSource) {
+        formData.append("sonar_config_source", options.configSource);
+      }
+      if (options.configFilename) {
+        formData.append("sonar_config_filename", options.configFilename);
+      }
+    }
+    const response = await fetch(`${API_BASE_URL}/api/data-sources`, {
       method: "POST",
       body: formData,
     });
@@ -93,8 +128,24 @@ export const api = {
     }
     return (await response.json()) as DataSource;
   },
+  updateDataSourceConfig: (id: string, payload: { content: string; source?: string; filename?: string | null }) =>
+    apiFetch<DataSource>(`/api/data-sources/${id}/config`, {
+      method: "PUT",
+      body: JSON.stringify(payload),
+    }),
   triggerCollection: (id: string) => apiFetch(`/api/data-sources/${id}/collect`, { method: "POST" }),
   listJobs: () => apiFetch<Job[]>("/api/jobs"),
   listRuns: () => apiFetch<SonarRun[]>("/api/sonar/runs"),
   listOutputs: () => apiFetch<OutputDataset[]>("/api/outputs"),
+  listDeadLetters: () => apiFetch<DeadLetter[]>("/api/dead-letters"),
+  updateDeadLetter: (id: string, payload: { config_override: string; config_source?: string }) =>
+    apiFetch<DeadLetter>(`/api/dead-letters/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(payload),
+    }),
+  retryDeadLetter: (id: string, payload: { config_override?: string; config_source?: string }) =>
+    apiFetch<DeadLetter>(`/api/dead-letters/${id}/retry`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
 };

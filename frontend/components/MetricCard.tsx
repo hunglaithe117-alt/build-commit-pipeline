@@ -1,9 +1,25 @@
-export function MetricCard({ label, value, hint }: { label: string; value: string | number; hint?: string }) {
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+
+type MetricCardProps = {
+  label: string;
+  value: string | number;
+  hint?: string;
+};
+
+export function MetricCard({ label, value, hint }: MetricCardProps) {
   return (
-    <div className="card">
-      <p style={{ color: "#475569", marginBottom: "0.25rem" }}>{label}</p>
-      <h3 style={{ fontSize: "2rem", margin: 0 }}>{value}</h3>
-      {hint && <small style={{ color: "#94a3b8" }}>{hint}</small>}
-    </div>
+    <Card>
+      <CardHeader className="space-y-2">
+        <CardDescription className="uppercase tracking-wide text-xs font-medium text-muted-foreground">
+          {label}
+        </CardDescription>
+        <CardTitle className="text-3xl font-semibold">{value}</CardTitle>
+      </CardHeader>
+      {hint && (
+        <CardContent>
+          <p className="text-xs text-muted-foreground">{hint}</p>
+        </CardContent>
+      )}
+    </Card>
   );
 }
