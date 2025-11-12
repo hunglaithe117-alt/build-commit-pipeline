@@ -230,9 +230,9 @@ class MetricsExporter:
         adapter = HTTPAdapter(max_retries=retry)
         session.mount("http://", adapter)
         session.mount("https://", adapter)
+        session.auth = (self.token, "")
         session.headers.update(
             {
-                "Authorization": f"Bearer {self.token}",
                 "Accept": "application/json",
             }
         )

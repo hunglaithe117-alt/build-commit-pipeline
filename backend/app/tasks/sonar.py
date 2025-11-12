@@ -7,7 +7,7 @@ from celery.utils.log import get_task_logger
 
 from app.celery_app import celery_app
 from app.core.config import settings
-from pipeline.sonar import MetricsExporter, get_runner_for_instance
+from pipeline.sonar import CommitScanResult, MetricsExporter, get_runner_for_instance
 from app.services import repository
 
 logger = get_task_logger(__name__)
@@ -38,6 +38,9 @@ def process_commit(
         sonar_instance=instance.name,
         sonar_host=instance.host,
     )
+
+    result: Optional[CommitScanResult] = None
+    failure_message: Optional[str] = None
     try:
         result = runner.scan_commit(
             repo_url=repo_url,
@@ -45,61 +48,54 @@ def process_commit(
             repo_slug=commit.get("repo_slug"),
         )
     except Exception as exc:
-        message = str(exc)
+        failure_message = str(exc)
         repository.upsert_sonar_run(
             data_source_id=data_source_id,
             project_key=project_key,
             commit_sha=commit_sha,
             job_id=job_id,
             status="failed",
-            message=message,
+            message=failure_message,
             sonar_instance=instance.name,
             sonar_host=instance.host,
         )
-        repository.update_job(
-            job_id,
-            status="failed",
-            last_error=message,
-            current_commit=None,
-        )
-        repository.update_data_source(data_source_id, status="failed")
         repository.insert_dead_letter(
-            payload={"job_id": job_id, "commit": commit, "error": message},
+            payload={"job_id": job_id, "commit": commit, "error": failure_message},
             reason="sonar-commit",
         )
         logger.exception("Commit %s failed", commit_sha)
-        raise
-
-    if result.skipped:
-        repository.upsert_sonar_run(
-            data_source_id=data_source_id,
-            project_key=project_key,
-            commit_sha=commit_sha,
-            job_id=job_id,
-            status="skipped",
-            log_path=str(result.log_path),
-            message=result.output,
-            component_key=result.component_key,
-            sonar_instance=result.instance_name,
-            sonar_host=instance.host,
-        )
     else:
-        repository.upsert_sonar_run(
-            data_source_id=data_source_id,
-            project_key=project_key,
-            commit_sha=commit_sha,
-            job_id=job_id,
-            status="submitted",
-            log_path=str(result.log_path),
-            component_key=result.component_key,
-            sonar_instance=result.instance_name,
-            sonar_host=instance.host,
-        )
+        if result.skipped:
+            repository.upsert_sonar_run(
+                data_source_id=data_source_id,
+                project_key=project_key,
+                commit_sha=commit_sha,
+                job_id=job_id,
+                status="skipped",
+                log_path=str(result.log_path),
+                message=result.output,
+                component_key=result.component_key,
+                sonar_instance=result.instance_name,
+                sonar_host=instance.host,
+            )
+        else:
+            repository.upsert_sonar_run(
+                data_source_id=data_source_id,
+                project_key=project_key,
+                commit_sha=commit_sha,
+                job_id=job_id,
+                status="submitted",
+                log_path=str(result.log_path),
+                component_key=result.component_key,
+                sonar_instance=result.instance_name,
+                sonar_host=instance.host,
+            )
 
     updated_job = repository.update_job(
         job_id,
         processed_delta=1,
         current_commit=None,
+        last_error=failure_message,
     )
     job_finished = bool(
         updated_job and updated_job.get("processed", 0) >= updated_job.get("total", 0)
@@ -109,12 +105,13 @@ def process_commit(
         repository.update_data_source(data_source_id, status="ready")
 
     logger.info(
-        "Processed commit %s on %s (component %s)",
+        "Processed commit %s on %s (component %s)%s",
         commit_sha,
         instance.name,
-        result.component_key,
+        component_key,
+        "" if not failure_message else " with errors",
     )
-    return result.component_key, job_finished
+    return component_key, job_finished
 
 
 @celery_app.task(bind=True, autoretry_for=(Exception,), retry_backoff=True, retry_kwargs={"max_retries": 3})
