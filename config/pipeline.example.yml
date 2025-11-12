@@ -3,9 +3,7 @@ paths:
   uploads: /app/data/uploads
   exports: /app/data/exports
   dead_letter: /app/data/dead_letter
-  sonar_instances_config: /app/sonar-scan/sonar_instances.example.json
   default_workdir: /app/data/sonar-work
-  travistorrent_root: /data/travistorrent
 mongo:
   uri: mongodb://travis:travis@mongo:27017
   database: travistorrent_pipeline
@@ -18,20 +16,17 @@ broker:
   dead_letter_queue: pipeline.dlq
 pipeline:
   ingestion_chunk_size: 2000
-  sonar_parallelism: 4
-  resume_failed_commits: true
-  default_retry_limit: 5
-  csv_encoding: utf-8
 sonarqube:
   webhook_secret: change-me
   webhook_public_url: http://localhost:8000/api/sonar/webhook
+  max_concurrent_jobs_per_instance: 1
   instances:
     - name: primary
       host: http://localhost:9001
-      token_env: SONARQUBE_TOKEN
+      token: "paste-token-here"
     - name: secondary
       host: http://sonarqube2:9002
-      token_env: SONARQUBE_TOKEN_SECONDARY
+      token: "paste-token-here"
   measures:
     keys:
       - bugs

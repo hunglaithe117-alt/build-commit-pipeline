@@ -177,6 +177,8 @@ class SonarCommitRunner:
             "--network=host",
             "-v",
             f"{working_dir}:/usr/src",
+            "-v",
+            f"{self.work_dir}:{self.work_dir}:ro",
             "sonarsource/sonar-scanner-cli",
         ]
         if config_path:

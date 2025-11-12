@@ -1,66 +1,70 @@
 services:
-  # api:
-  #   build:
-  #     context: ./backend
-  #   container_name: build_commit_api
-  #   command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
-  #   environment:
-  #     PIPELINE_CONFIG: /app/config/pipeline.yml
-  #   volumes:
-  #     - ./backend:/app
-  #     - ./config/pipeline.yml:/app/config/pipeline.yml:ro
-  #     - ../sonar-scan:/app/sonar-scan:ro
-  #     - ./data:/app/data
-  #     - ../sonar-scan:/app/sonar-scan:ro
-  #   depends_on:
-  #     - rabbitmq
-  #     - mongo
-  #   ports:
-  #     - "8000:8000"
+  api:
+    build:
+      context: ./backend
+    container_name: build_commit_api
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    user: "${APP_UID:-1000}:${APP_GID:-1000}"
+    environment:
+      PIPELINE_CONFIG: /app/config/pipeline.yml
+    volumes:
+      - ./backend:/app
+      - ./config/pipeline.yml:/app/config/pipeline.yml:ro
+      - ./data:/app/data
+      - ../sonar-scan:/app/sonar-scan:ro
+    depends_on:
+      - rabbitmq
+      - mongo
+    ports:
+      - "8000:8000"
 
-  # worker:
-  #   build:
-  #     context: ./backend
-  #   container_name: build_commit_worker
-  #   command: celery -A app.celery_app.celery_app worker --loglevel=info
-  #   environment:
-  #     PIPELINE_CONFIG: /app/config/pipeline.yml
-  #   volumes:
-  #     - ./backend:/app
-  #     - ./config/pipeline.yml:/app/config/pipeline.yml:ro
-  #     - ./data:/app/data
-  #     - ../sonar-scan:/app/sonar-scan:ro
-  #   depends_on:
-  #     - rabbitmq
-  #     - mongo
+  worker:
+    build:
+      context: ./backend
+    container_name: build_commit_worker
+    command: celery -A app.celery_app.celery_app worker --loglevel=info
+    user: "${APP_UID:-1000}:${APP_GID:-1000}"
+    environment:
+      PIPELINE_CONFIG: /app/config/pipeline.yml
+    volumes:
+      - ./backend:/app
+      - ./config/pipeline.yml:/app/config/pipeline.yml:ro
+      - ./data:/app/data
+      - ../sonar-scan:/app/sonar-scan:ro
+    depends_on:
+      - rabbitmq
+      - mongo
 
-  # beat:
-  #   build:
-  #     context: ./backend
-  #   container_name: build_commit_beat
-  #   command: celery -A app.celery_app.celery_app beat --loglevel=info
-  #   environment:
-  #     PIPELINE_CONFIG: /app/config/pipeline.yml
-  #   volumes:
-  #     - ./backend:/app
-  #     - ./config/pipeline.yml:/app/config/pipeline.yml:ro
-  #   depends_on:
-  #     - rabbitmq
-  #     - mongo
+  beat:
+    build:
+      context: ./backend
+    container_name: build_commit_beat
+    command: celery -A app.celery_app.celery_app beat --loglevel=info
+    user: "${APP_UID:-1000}:${APP_GID:-1000}"
+    environment:
+      PIPELINE_CONFIG: /app/config/pipeline.yml
+    volumes:
+      - ./backend:/app
+      - ./config/pipeline.yml:/app/config/pipeline.yml:ro
+      - ./data:/app/data
+    depends_on:
+      - rabbitmq
+      - mongo
 
-  # frontend:
-  #   build:
-  #     context: ./frontend
-  #   container_name: build_commit_frontend
-  #   command: npm run dev -- --hostname 0.0.0.0 --port 3000
-  #   environment:
-  #     NEXT_PUBLIC_API_BASE_URL: http://localhost:8000
-  #   volumes:
-  #     - ./frontend:/app
-  #   depends_on:
-  #     - api
-  #   ports:
-  #     - "3000:3000"
+  frontend:
+    build:
+      context: ./frontend
+    container_name: build_commit_frontend
+    command: npm run dev -- --hostname 0.0.0.0 --port 3000
+    user: "${APP_UID:-1000}:${APP_GID:-1000}"
+    environment:
+      NEXT_PUBLIC_API_BASE_URL: http://localhost:8000
+    volumes:
+      - ./frontend:/app
+    depends_on:
+      - api
+    ports:
+      - "3000:3000"
 
   rabbitmq:
     image: rabbitmq:3.12-management

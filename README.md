@@ -33,9 +33,9 @@ Observability
 Chạy toàn bộ stack bằng Docker (gồm API, worker, frontend, RabbitMQ, Mongo, SonarQube nếu bạn có cấu hình):
 
 ```bash
-# đặt biến môi trường token SonarQube cho shell (zsh)
-export SONARQUBE_TOKEN=xxxx
-# build + up toàn bộ stack
+cp .env.example .env                            # sau đó chỉnh APP_UID/APP_GID theo máy của bạn
+# hoặc một dòng: APP_UID=$(id -u) APP_GID=$(id -g) envsubst < .env.example > .env
+# chỉnh token SonarQube trong config/pipeline.yml trước khi khởi động
 docker compose up --build
 ```
 
@@ -64,18 +64,18 @@ npm run dev
 - SonarQube không gửi webhook: kiểm tra `sonarqube.webhook_secret` trong `config/pipeline.yml` và đảm bảo endpoint `http://<host>:8000/api/sonar/webhook` có thể truy cập từ SonarQube container.
 - Celery không thực thi task: kiểm tra broker (RabbitMQ) URL và rằng worker đang chạy (`uv run celery -A app.celery_app.celery_app worker -l info`).
 - Kết nối Mongo thất bại: kiểm tra chuỗi kết nối trong `config/pipeline.yml` và đảm bảo Mongo đã khởi động trước khi API kết nối.
-- SonarScanner không chạy: đảm bảo SonarScanner CLI có sẵn trên host/container và biến `SONARQUBE_TOKEN` hợp lệ.
+- SonarScanner không chạy: đảm bảo SonarScanner CLI có sẵn trên host/container và mỗi instance trong `config/pipeline.yml` có token hợp lệ.
 
 ## Chuẩn bị
 
 1. **Chạy SonarQube**: dùng `sonar-scan/docker-compose.sonarqube.yml` như bạn đã có để bật SonarQube và SonarScanner CLI.
-2. **Điền config**:
+2. **Tạo `.env`**: sao chép `.env.example` thành `.env`, đặt `APP_UID` và `APP_GID` (thường là kết quả của `id -u` và `id -g`). Docker Compose sẽ chạy các service backend bằng UID/GID này để mọi file trong `./data` luôn thuộc sở hữu user hiện tại, không phải chạy `sudo chown` sau mỗi lần pull. Nếu trước đây thư mục `data/` đã bị root chiếm quyền, chỉ cần `sudo chown -R $(id -u):$(id -g) data` **một lần** để đồng bộ lại.
+3. **Điền config**:
    - Sao chép `config/pipeline.example.yml` thành `config/pipeline.yml` (đã thực hiện với cấu hình mặc định). Cập nhật:
-     - `sonarqube.instances`: danh sách SonarQube instances bạn muốn scale (host, token env, scanner bin). Worker sẽ round-robin commit qua các instance này.
-     - `sonarqube.token_env` hoặc `sonarqube.token`: giá trị mặc định nếu không khai báo `instances`.
+     - `sonarqube.instances`: danh sách SonarQube bạn muốn dùng (mỗi entry cần `host` và `token`). Worker sẽ round-robin commit qua các instance này.
+     - `sonarqube.max_concurrent_jobs_per_instance`: số commit song song tối đa trên mỗi instance (Community Edition = 1).
      - `sonarqube.webhook_secret`: chuỗi bí mật để SonarQube gửi webhook.
-3. **Env**: export `SONARQUBE_TOKEN=<token>` trước khi chạy docker-compose (hoặc ghi trực tiếp vào YAML nếu thuận tiện).
-4. **Logging**: Giữ nguyên `config/promtail-config.yml` hoặc chỉnh để bổ sung đường log. Khi chạy stack nhớ bật `loki`, `promtail`, `grafana` để theo dõi log realtime.
+4. **Logging (tùy chọn)**: Nếu sử dụng Loki + Promtail + Grafana trong `docker-compose.yml`, giữ nguyên `config/promtail-config.yml` hoặc chỉnh lại đường log mong muốn.
 
 ## Backend dùng uv
 
@@ -96,7 +96,7 @@ Dockerfile backend cũng sử dụng `uv sync --frozen` nên build luôn bám s�
 
 ```bash
 cd build-commit-pipeline
-SONARQUBE_TOKEN=xxxx docker compose up --build
+docker compose up --build
 ```
 
 - API: <http://localhost:8000>
@@ -108,7 +108,7 @@ SONARQUBE_TOKEN=xxxx docker compose up --build
 
 1. **Nguồn dữ liệu** (`/data-sources`)
    - Upload file CSV (ví dụ từ `19314170/ruby_per_project_csv`). Backend tự động tóm tắt số build/commit, tạo record trong Mongo.
-   - Bấm "Thu thập dữ liệu" để queue job Celery (`ingest_data_source`). Mỗi CSV sẽ được gán độc quyền cho một SonarQube instance và được xử lý tuần tự commit-by-commit cho tới khi hoàn thành.
+   - Bấm "Thu thập dữ liệu" để queue job Celery (`ingest_data_source`). Các commit trong CSV sẽ được đưa vào hàng đợi và phân phối lần lượt cho từng SonarQube instance, mỗi instance chỉ chạy tối đa 1 commit (Community) tại một thời điểm.
 
 2. **Thu thập** (`/jobs`)
    - Theo dõi trạng thái job (queued/running/succeeded/failed), số commit đã xử lý / tổng và commit đang chạy. Progress bar cập nhật mỗi 5 giây với dữ liệu realtime từ Mongo.
@@ -125,20 +125,20 @@ Trong `config/pipeline.yml`, bạn có thể khai báo nhiều instance:
 
 ```yaml
 sonarqube:
-  default_instance: primary
+  max_concurrent_jobs_per_instance: 1
   instances:
     - name: primary
       host: http://sonarqube1:9000
-      token_env: SONARQUBE_TOKEN_PRIMARY
+      token: "token-primary"
     - name: secondary
       host: http://sonarqube2:9000
-      token_env: SONARQUBE_TOKEN_SECONDARY
+      token: "token-secondary"
 ```
 
 Mỗi commit từ CSV sẽ được gán lần lượt cho từng instance. Thông tin `sonar_instance`, `sonar_host`, commit hiện tại và log file đều được hiển thị trên giao diện `/jobs` và `/sonar-runs` để dễ theo dõi realtime.
 
-- Hệ thống sử dụng `instance_locks` trong Mongo để đảm bảo **mỗi SonarQube chỉ xử lý một CSV tại một thời điểm**. Nếu có nhiều CSV hơn số instance, các job mới sẽ tự động chờ cho tới khi một instance rảnh và Celery sẽ retry.
-- Khi một instance đã được cấp phát cho một CSV, toàn bộ commit trong file đó sẽ chạy tuần tự trên instance đó cho tới khi hoàn thành (hoặc lỗi). Điều này giúp bạn dễ dàng scale “2 SonarQube = 2 CSV chạy song song”.
+- Hệ thống sử dụng `instance_locks` trong Mongo để đảm bảo **mỗi SonarQube chỉ xử lý nhiều nhất `max_concurrent_jobs_per_instance` commit cùng lúc**. Nếu tất cả instance đều bận, Celery sẽ retry cho tới khi có slot trống.
+- Round-robin + lock đảm bảo các commit được dàn đều trên các server hiện có mà không cần phải tách file CSV theo instance.
 - Docker Compose đã cấu hình sẵn hai database Postgres (`sonar_primary`, `sonar_secondary`) thông qua `config/postgres-init.sql`, vì vậy mỗi SonarQube container sử dụng schema riêng biệt và không tranh chấp migration. Nếu bạn đã chạy phiên bản cũ (một database), hãy xóa volume `postgres_data` trước khi khởi động lại để script có cơ hội tạo schema mới.
 
 ## Observability (Grafana + Loki)
