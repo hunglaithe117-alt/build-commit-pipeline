@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import logging
+from hashlib import sha256
 import shutil
 import subprocess
+from contextlib import contextmanager
 from dataclasses import dataclass
+import fcntl
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional
 
@@ -64,6 +67,12 @@ class SonarCommitRunner:
         base_dir = Path(settings.paths.default_workdir or (Path("/tmp") / "sonar-work"))
         self.work_dir = base_dir / self.instance.name / project_key
         self.repo_dir = self.work_dir / "repo"
+        self.worktrees_dir = self.work_dir / "worktrees"
+        self.config_dir = self.work_dir / "configs"
+        self.worktrees_dir.mkdir(parents=True, exist_ok=True)
+        self.config_dir.mkdir(parents=True, exist_ok=True)
+        self.repo_lock_path = self.work_dir / ".repo.lock"
+        self.repo_lock_path.touch(exist_ok=True)
         self.logs_dir = self.work_dir / "logs"
         self.work_dir.mkdir(parents=True, exist_ok=True)
         self.logs_dir.mkdir(parents=True, exist_ok=True)
@@ -74,18 +83,72 @@ class SonarCommitRunner:
 
     def ensure_repo(self, repo_url: str) -> Path:
         if self.repo_dir.exists() and (self.repo_dir / ".git").exists():
-            run_command(["git", "fetch", "--all"], cwd=self.repo_dir, allow_fail=True)
-        else:
-            if self.repo_dir.exists():
-                shutil.rmtree(self.repo_dir)
-            run_command(["git", "clone", repo_url, str(self.repo_dir)])
+            return self.repo_dir
+        if self.repo_dir.exists():
+            shutil.rmtree(self.repo_dir)
+        run_command(["git", "clone", repo_url, str(self.repo_dir)])
         return self.repo_dir
+
+    @contextmanager
+    def repo_mutex(self):
+        with self.repo_lock_path.open("r+") as handle:
+            fcntl.flock(handle, fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(handle, fcntl.LOCK_UN)
+
+    def refresh_repo(self, repo_url: str) -> Path:
+        repo = self.ensure_repo(repo_url)
+        run_command(["git", "remote", "set-url", "origin", repo_url], cwd=repo, allow_fail=True)
+        run_command(["git", "fetch", "--all", "--tags", "--prune"], cwd=repo, allow_fail=True)
+        return repo
 
     def checkout_commit(self, commit_sha: str) -> None:
         run_command(["git", "checkout", "-f", commit_sha], cwd=self.repo_dir)
         run_command(["git", "clean", "-fdx"], cwd=self.repo_dir, allow_fail=True)
 
-    def build_scan_command(self, component_key: str, project_type: str) -> List[str]:
+    def create_worktree(self, commit_sha: str) -> Path:
+        target = self.worktrees_dir / commit_sha
+        if target.exists():
+            run_command(
+                ["git", "worktree", "remove", str(target), "--force"],
+                cwd=self.repo_dir,
+                allow_fail=True,
+            )
+            shutil.rmtree(target, ignore_errors=True)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        run_command(
+            ["git", "worktree", "add", "--detach", str(target), commit_sha],
+            cwd=self.repo_dir,
+        )
+        run_command(["git", "clean", "-fdx"], cwd=target, allow_fail=True)
+        return target
+
+    def remove_worktree(self, commit_sha: str) -> None:
+        target = self.worktrees_dir / commit_sha
+        if target.exists():
+            run_command(
+                ["git", "worktree", "remove", str(target), "--force"],
+                cwd=self.repo_dir,
+                allow_fail=True,
+            )
+            shutil.rmtree(target, ignore_errors=True)
+
+    def ensure_override_config(self, content: str) -> Path:
+        digest = sha256(content.encode("utf-8")).hexdigest()
+        config_path = self.config_dir / f"override_{digest}.properties"
+        if not config_path.exists():
+            config_path.write_text(content, encoding="utf-8")
+        return config_path
+
+    def build_scan_command(
+        self,
+        component_key: str,
+        project_type: str,
+        working_dir: Path,
+        config_path: Optional[Path] = None,
+    ) -> List[str]:
         scanner_args = [
             f"-Dsonar.projectKey={component_key}",
             f"-Dsonar.projectName={self.project_key}",
@@ -104,15 +167,25 @@ class SonarCommitRunner:
                 ]
             )
 
+        if config_path:
+            scanner_args.append(f"-Dproject.settings=/usr/src/{config_path.name}")
+
         docker_cmd = [
             "docker",
             "run",
             "--rm",
             "--network=host",
             "-v",
-            f"{self.repo_dir}:/usr/src",
+            f"{working_dir}:/usr/src",
             "sonarsource/sonar-scanner-cli",
         ]
+        if config_path:
+            container_config_path = "/tmp/sonar-project.properties"
+            docker_cmd.extend(
+                ["-v", f"{config_path}:{container_config_path}:ro"]
+            )
+            scanner_args.append(f"-Dproject.settings={container_config_path}")
+
         docker_cmd.extend(scanner_args)
 
         return docker_cmd
@@ -151,6 +224,7 @@ class SonarCommitRunner:
         repo_url: str,
         commit_sha: str,
         repo_slug: Optional[str] = None,
+        config_path: Optional[str] = None,
     ) -> CommitScanResult:
         component_key = f"{self.project_key}_{commit_sha}"
         if self.project_exists(component_key):
@@ -166,17 +240,19 @@ class SonarCommitRunner:
                 skipped=True,
             )
 
-        repo = self.ensure_repo(repo_url)
-        self.checkout_commit(commit_sha)
-        project_type = self.detect_project_type()
-        cmd = self.build_scan_command(component_key, project_type)
+        worktree: Optional[Path] = None
         log_path = self.logs_dir / f"{commit_sha}.log"
         try:
-            output = run_command(cmd, cwd=repo)
-        except Exception as exc:
-            log_path.write_text(str(exc), encoding="utf-8")
-            raise
-        else:
+            with self.repo_mutex():
+                self.refresh_repo(repo_url)
+                worktree = self.create_worktree(commit_sha)
+
+            project_type = self.detect_project_type(worktree)
+            effective_config = Path(config_path) if config_path else None
+            cmd = self.build_scan_command(
+                component_key, project_type, worktree, effective_config
+            )
+            output = run_command(cmd, cwd=worktree)
             log_path.write_text(output, encoding="utf-8")
             return CommitScanResult(
                 component_key=component_key,
@@ -184,16 +260,21 @@ class SonarCommitRunner:
                 output=output,
                 instance_name=self.instance.name,
             )
+        except Exception as exc:
+            log_path.write_text(str(exc), encoding="utf-8")
+            raise
+        finally:
+            if worktree is not None:
+                with self.repo_mutex():
+                    self.remove_worktree(commit_sha)
 
-    def detect_project_type(self) -> str:
+    def detect_project_type(self, root: Path) -> str:
         ruby_hits = 0
-        if (self.repo_dir / "Gemfile").exists() or (
-            self.repo_dir / "Rakefile"
-        ).exists():
+        if (root / "Gemfile").exists() or ((root / "Rakefile").exists()):
             return "ruby"
-        if any(self.repo_dir.glob("*.gemspec")):
+        if any(root.glob("*.gemspec")):
             return "ruby"
-        for path in self.repo_dir.rglob("*.rb"):
+        for path in root.rglob("*.rb"):
             ruby_hits += 1
             if ruby_hits >= 5:
                 break
@@ -230,12 +311,8 @@ class MetricsExporter:
         adapter = HTTPAdapter(max_retries=retry)
         session.mount("http://", adapter)
         session.mount("https://", adapter)
-        session.headers.update(
-            {
-                "Authorization": f"Bearer {self.token}",
-                "Accept": "application/json",
-            }
-        )
+        session.auth = (self.token, "")
+        session.headers.update({"Accept": "application/json"})
         return session
 
     def _chunks(self, items: List[str]) -> Iterable[List[str]]:

@@ -17,7 +17,7 @@ broker:
   default_queue: pipeline.default
   dead_letter_queue: pipeline.dlq
 pipeline:
-  ingestion_chunk_size: 250
+  ingestion_chunk_size: 2000
   sonar_parallelism: 4
   resume_failed_commits: true
   default_retry_limit: 5

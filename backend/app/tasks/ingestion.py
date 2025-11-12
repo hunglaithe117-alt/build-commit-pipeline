@@ -7,9 +7,9 @@ from celery.utils.log import get_task_logger
 from app.celery_app import celery_app
 from app.core.config import settings
 from pipeline.ingestion import CSVIngestionPipeline
-from pipeline.sonar import get_runner_for_instance, normalize_repo_url
+from pipeline.sonar import normalize_repo_url
 from app.services import repository
-from app.tasks.sonar import process_commit
+from app.tasks.sonar import run_commit_scan
 
 logger = get_task_logger(__name__)
 
@@ -38,45 +38,17 @@ def ingest_data_source(self, data_source_id: str) -> dict:
         repository.update_data_source(data_source_id, status="ready")
         return {"job_id": job["id"], "queued": 0}
 
-    instances = settings.sonarqube.get_instances()
-    assigned_instance = None
-    max_concurrent = settings.sonarqube.max_concurrent_jobs_per_instance
-    for candidate in instances:
-        if repository.acquire_instance_lock(candidate.name, job["id"], data_source_id, max_concurrent):
-            assigned_instance = candidate
-            break
-    if not assigned_instance:
-        logger.info("No SonarQube instance available; retrying later.")
-        repository.update_job(job["id"], status="queued")
-        raise self.retry(countdown=60)
+    repository.update_job(job["id"], status="running")
 
-    repository.update_job(job["id"], status="running", sonar_instance=assigned_instance.name)
-    runner_project_key = summary.get("project_key") or data_source.get("name") or job["id"]
-    runner = get_runner_for_instance(runner_project_key, assigned_instance.name)
+    queued = 0
+    for chunk in pipeline.iter_commit_chunks(settings.pipeline.ingestion_chunk_size):
+        for item in chunk:
+            payload = item.to_dict()
+            payload["repo_url"] = normalize_repo_url(
+                payload.get("repository_url"), payload.get("repo_slug")
+            )
+            run_commit_scan.delay(job["id"], data_source_id, payload)
+            queued += 1
 
-    processed = 0
-    job_finished = False
-    try:
-        for chunk in pipeline.iter_commit_chunks(settings.pipeline.ingestion_chunk_size):
-            for item in chunk:
-                payload = item.to_dict()
-                payload["repo_url"] = normalize_repo_url(
-                    payload.get("repository_url"), payload.get("repo_slug")
-                )
-                payload["sonar_instance"] = assigned_instance.name
-                _, job_finished = process_commit(job["id"], data_source_id, payload, runner)
-                processed += 1
-                if job_finished:
-                    break
-            if job_finished:
-                break
-    finally:
-        repository.release_instance_lock(assigned_instance.name, job["id"])
-
-    logger.info(
-        "Completed %d commits for job %s on instance %s",
-        processed,
-        job["id"],
-        assigned_instance.name,
-    )
-    return {"job_id": job["id"], "processed": processed, "sonar_instance": assigned_instance.name}
+    logger.info("Queued %d commits for job %s", queued, job["id"])
+    return {"job_id": job["id"], "queued": queued}

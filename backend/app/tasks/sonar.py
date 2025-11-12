@@ -13,11 +13,16 @@ from app.services import repository
 logger = get_task_logger(__name__)
 
 
+class NoAvailableSonarInstance(RuntimeError):
+    """Raised when every SonarQube instance is currently busy."""
+
+
 def process_commit(
     job_id: str,
     data_source_id: str,
     commit: Dict[str, str],
     runner,
+    config_path: Optional[str] = None,
 ) -> Tuple[str, bool]:
     commit_sha = commit.get("commit_sha")
     project_key = commit.get("project_key")
@@ -43,6 +48,7 @@ def process_commit(
             repo_url=repo_url,
             commit_sha=commit_sha,
             repo_slug=commit.get("repo_slug"),
+            config_path=config_path,
         )
     except Exception as exc:
         message = str(exc)
@@ -64,7 +70,12 @@ def process_commit(
         )
         repository.update_data_source(data_source_id, status="failed")
         repository.insert_dead_letter(
-            payload={"job_id": job_id, "commit": commit, "error": message},
+            payload={
+                "job_id": job_id,
+                "data_source_id": data_source_id,
+                "commit": commit,
+                "error": message,
+            },
             reason="sonar-commit",
         )
         logger.exception("Commit %s failed", commit_sha)
@@ -117,21 +128,76 @@ def process_commit(
     return result.component_key, job_finished
 
 
+def _max_instance_parallelism() -> int:
+    configured = settings.sonarqube.max_concurrent_jobs_per_instance
+    if configured and configured > 0:
+        return configured
+    return 1
+
+
+def _acquire_instance_slot(job_id: str, data_source_id: str):
+    instances = settings.sonarqube.get_instances()
+    if not instances:
+        raise ValueError("No SonarQube instances configured.")
+
+    total_instances = len(instances)
+    max_parallel = _max_instance_parallelism()
+
+    for _ in range(total_instances):
+        index = repository.next_round_robin_index(total_instances)
+        instance = instances[index]
+        if repository.acquire_instance_lock(
+            instance.name,
+            job_id,
+            data_source_id,
+            max_concurrent=max_parallel,
+        ):
+            return instance
+
+    raise NoAvailableSonarInstance("All SonarQube instances are busy")
+
+
 @celery_app.task(bind=True, autoretry_for=(Exception,), retry_backoff=True, retry_kwargs={"max_retries": 3})
 def run_commit_scan(self, job_id: str, data_source_id: str, commit: Dict[str, str]) -> str:
     project_key = commit.get("project_key")
     if not project_key:
         raise ValueError("Commit payload missing project_key")
-    instance_name = commit.get("sonar_instance")
-    runner = get_runner_for_instance(project_key, instance_name)
-    job_finished = False
+
     try:
-        component_key, job_finished = process_commit(job_id, data_source_id, commit, runner)
-    except Exception:
-        repository.release_instance_lock(runner.instance.name, job_id)
-        raise
-    if job_finished:
-        repository.release_instance_lock(runner.instance.name, job_id)
+        instance = _acquire_instance_slot(job_id, data_source_id)
+    except NoAvailableSonarInstance as exc:
+        commit_sha = commit.get("commit_sha")
+        logger.info(
+            "All SonarQube instances busy for job %s commit %s; retrying in 30s",
+            job_id,
+            commit_sha,
+        )
+        raise self.retry(exc=exc, countdown=30, max_retries=1000000)
+
+    runner = get_runner_for_instance(project_key, instance.name)
+    repository.update_job(job_id, sonar_instance=instance.name)
+    data_source = repository.get_data_source(data_source_id)
+    default_config_path = None
+    if data_source:
+        default_config_path = (data_source.get("sonar_config") or {}).get("file_path")
+    override_text = commit.get("config_override")
+    if override_text:
+        config_path = runner.ensure_override_config(override_text)
+    else:
+        config_path = default_config_path
+
+    component_key = None
+    try:
+        component_key, job_finished = process_commit(
+            job_id,
+            data_source_id,
+            commit,
+            runner,
+            config_path=config_path,
+        )
+    finally:
+        repository.release_instance_lock(instance.name, job_id)
+
     return component_key
 
 

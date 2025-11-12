@@ -35,7 +35,7 @@ class BrokerSettings(BaseModel):
 
 
 class PipelineTuning(BaseModel):
-    ingestion_chunk_size: int = Field(default=250)
+    ingestion_chunk_size: int = Field(default=2000)
     sonar_parallelism: int = Field(default=4)
     resume_failed_commits: bool = Field(default=True)
     default_retry_limit: int = Field(default=5)
@@ -64,7 +64,7 @@ class SonarInstanceSettings(BaseModel):
 class SonarSettings(BaseModel):
     webhook_secret: str = Field(default="change-me")
     webhook_public_url: str = Field(default="http://localhost:8000/api/sonar/webhook")
-    max_concurrent_jobs_per_instance: int = Field(default=2)
+    max_concurrent_jobs_per_instance: int = Field(default=1)
     measures: SonarMeasures = Field(default_factory=SonarMeasures)
     instances: List[SonarInstanceSettings] = Field(default_factory=list)
 

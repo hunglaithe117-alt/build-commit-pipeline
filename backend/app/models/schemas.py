@@ -32,6 +32,14 @@ class CSVSummary(BaseModel):
     last_commit: Optional[str] = None
 
 
+class SonarConfig(BaseModel):
+    content: str
+    source: str = Field(default="text")
+    filename: Optional[str] = None
+    file_path: Optional[str] = None
+    updated_at: datetime
+
+
 class DataSource(BaseModel):
     id: str
     name: str
@@ -41,6 +49,7 @@ class DataSource(BaseModel):
     created_at: datetime
     updated_at: datetime
     stats: Optional[CSVSummary] = None
+    sonar_config: Optional[SonarConfig] = None
 
 
 class Job(BaseModel):
@@ -84,7 +93,12 @@ class DeadLetter(BaseModel):
     id: str
     payload: dict
     reason: str
+    status: str = "pending"
+    config_override: Optional[str] = None
+    config_source: Optional[str] = None
     created_at: datetime
+    updated_at: Optional[datetime] = None
+    resolved_at: Optional[datetime] = None
 
 
 class OutputDataset(BaseModel):
