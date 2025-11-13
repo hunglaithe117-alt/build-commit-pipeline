@@ -23,6 +23,12 @@ class Repository:
     def list_data_sources(self, *a, **k):
         return self.data_sources.list_data_sources(*a, **k)
 
+    def list_data_sources_paginated(self, *a, **k):
+        return self.data_sources.list_data_sources_paginated(*a, **k)
+
+    def list_jobs_paginated(self, *a, **k):
+        return self.jobs.list_jobs_paginated(*a, **k)
+
     def get_data_source(self, *a, **k):
         return self.data_sources.get_data_source(*a, **k)
 
@@ -77,6 +83,9 @@ class Repository:
 
     def list_outputs(self, *a, **k):
         return self.outputs.list_outputs(*a, **k)
+
+    def list_outputs_paginated(self, *a, **k):
+        return self.outputs.list_outputs_paginated(*a, **k)
 
     def get_output(self, *a, **k):
         return self.outputs.get_output(*a, **k)
