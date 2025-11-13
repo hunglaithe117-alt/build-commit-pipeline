@@ -12,9 +12,10 @@ from app.core.config import settings
 from app.models import SonarRun
 from app.services import repository
 from app.tasks.sonar import export_metrics
+import logging
 
 router = APIRouter()
-
+LOG = logging.getLogger("sonar_api")
 
 @router.get("/runs", response_model=List[SonarRun])
 async def list_runs() -> List[SonarRun]:
@@ -45,6 +46,7 @@ async def sonar_webhook(
     body = await request.body()
     _validate_signature(body, x_sonar_webhook_hmac_sha256, x_sonar_secret)
     payload = json.loads(body.decode("utf-8") or "{}")
+    LOG.info("Received SonarQube webhook: %s", payload)
     component_key = payload.get("project", {}).get("key")
     if not component_key:
         raise HTTPException(status_code=400, detail="project key missing")

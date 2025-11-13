@@ -92,6 +92,13 @@ class WebSettings(BaseModel):
     base_url: str = Field(default="http://localhost:3000")
 
 
+class LoggingSettings(BaseModel):
+    """Logging configuration loaded from pipeline.yml."""
+
+    # Accept either a level name (e.g. INFO, DEBUG) or numeric level as str.
+    level: str = Field(default="INFO")
+
+
 class Settings(BaseModel):
     environment: str = Field(default="local")
     paths: PathsSettings = Field(default_factory=PathsSettings)
@@ -101,6 +108,7 @@ class Settings(BaseModel):
     sonarqube: SonarSettings = Field(default_factory=SonarSettings)
     storage: StorageCollections = Field(default_factory=StorageCollections)
     web: WebSettings = Field(default_factory=WebSettings)
+    logging: LoggingSettings = Field(default_factory=LoggingSettings)
 
     @property
     def sonar_token(self) -> str:

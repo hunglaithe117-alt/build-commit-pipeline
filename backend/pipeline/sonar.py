@@ -100,8 +100,12 @@ class SonarCommitRunner:
 
     def refresh_repo(self, repo_url: str) -> Path:
         repo = self.ensure_repo(repo_url)
-        run_command(["git", "remote", "set-url", "origin", repo_url], cwd=repo, allow_fail=True)
-        run_command(["git", "fetch", "--all", "--tags", "--prune"], cwd=repo, allow_fail=True)
+        run_command(
+            ["git", "remote", "set-url", "origin", repo_url], cwd=repo, allow_fail=True
+        )
+        run_command(
+            ["git", "fetch", "--all", "--tags", "--prune"], cwd=repo, allow_fail=True
+        )
         return repo
 
     def checkout_commit(self, commit_sha: str) -> None:
@@ -151,7 +155,7 @@ class SonarCommitRunner:
     ) -> List[str]:
         scanner_args = [
             f"-Dsonar.projectKey={component_key}",
-            f"-Dsonar.projectName={self.project_key}",
+            f"-Dsonar.projectName={component_key}",
             "-Dsonar.sources=.",
             f"-Dsonar.host.url={self.host}",
             f"-Dsonar.token={self.token}",
@@ -183,9 +187,7 @@ class SonarCommitRunner:
         ]
         if config_path:
             container_config_path = "/tmp/sonar-project.properties"
-            docker_cmd.extend(
-                ["-v", f"{config_path}:{container_config_path}:ro"]
-            )
+            docker_cmd.extend(["-v", f"{config_path}:{container_config_path}:ro"])
             scanner_args.append(f"-Dproject.settings={container_config_path}")
 
         docker_cmd.extend(scanner_args)
@@ -254,6 +256,7 @@ class SonarCommitRunner:
             cmd = self.build_scan_command(
                 component_key, project_type, worktree, effective_config
             )
+            LOG.debug("Scanning commit %s with command: %s", commit_sha, " ".join(cmd))
             output = run_command(cmd, cwd=worktree)
             log_path.write_text(output, encoding="utf-8")
             return CommitScanResult(
@@ -286,7 +289,6 @@ class SonarCommitRunner:
 
 
 class MetricsExporter:
-    """Lightweight exporter inspired by batch_fetch_all_measures.py."""
 
     def __init__(self, host: str, token: str) -> None:
         self.host = host.rstrip("/")
@@ -297,7 +299,7 @@ class MetricsExporter:
         self.chunk_size = self.settings.sonarqube.measures.chunk_size
 
     @classmethod
-    def from_instance(cls, instance: SonarInstanceSettings) -> "MetricsExporter":
+    def from_instance(cls, instance: SonarInstanceSettings) -> MetricsExporter:
         return cls(host=instance.host, token=instance.resolved_token())
 
     def _build_session(self) -> requests.Session:

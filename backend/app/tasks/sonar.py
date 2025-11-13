@@ -189,6 +189,7 @@ def export_metrics(
     analysis_id: Optional[str] = None,
 ) -> str:
     run_doc = repository.find_sonar_run_by_component(component_key)
+    logger.info("Exporting metrics for component_key=%s, run_doc=%s", component_key, run_doc)
     if run_doc:
         instance = settings.sonarqube.get_instance(run_doc.get("sonar_instance"))
         target_job_id = job_id or run_doc.get("job_id") or "ad-hoc"

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from celery import Celery
+from kombu import Queue
 
 from app.core.config import settings
 
@@ -25,12 +26,16 @@ celery_app.conf.update(
     task_retry_backoff_max=180,  # Max 3 minutes
     task_retry_jitter=True,  # Add randomness to avoid thundering herd
     task_routes={
-        "app.tasks.sonar.export_metrics": {"queue": settings.broker.default_queue},
-        "app.tasks.sonar.run_commit_scan": {"queue": settings.broker.default_queue},
-        "app.tasks.ingestion.ingest_data_source": {
-            "queue": settings.broker.default_queue
-        },
+        "app.tasks.sonar.export_metrics": {"queue": "pipeline.exports"},
+        "app.tasks.sonar.run_commit_scan": {"queue": "pipeline.scan"},
+        "app.tasks.ingestion.ingest_data_source": {"queue": "pipeline.ingest"},
     },
+)
+
+celery_app.conf.task_queues = (
+    Queue("pipeline.ingest"),
+    Queue("pipeline.scan"),
+    Queue("pipeline.exports"),
 )
 
 
