@@ -52,6 +52,9 @@ class Repository:
     def list_sonar_runs(self, *a, **k):
         return self.sonar_runs.list_sonar_runs(*a, **k)
 
+    def list_sonar_runs_paginated(self, *a, **k):
+        return self.sonar_runs.list_sonar_runs_paginated(*a, **k)
+
     def find_sonar_run_by_component(self, *a, **k):
         return self.sonar_runs.find_sonar_run_by_component(*a, **k)
 
