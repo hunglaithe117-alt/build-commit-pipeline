@@ -15,13 +15,27 @@ const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8
 export default function OutputsPage() {
   const [outputs, setOutputs] = useState<OutputDataset[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [pageIndex, setPageIndex] = useState(0);
+  const [total, setTotal] = useState(0);
 
-  useEffect(() => {
-    api
-      .listOutputs()
-      .then(setOutputs)
-      .catch((err) => setError(err.message));
-  }, []);
+  const handleServerChange = async (params: {
+    pageIndex: number;
+    pageSize: number;
+    sorting?: { id: string; desc?: boolean } | null;
+    filters: Record<string, any>;
+  }) => {
+    setError(null);
+    try {
+      const sortBy = params.sorting?.id;
+      const sortDir = params.sorting?.desc ? "desc" : "asc";
+      const res = await api.listOutputsPaginated(params.pageIndex + 1, params.pageSize, sortBy, sortDir, params.filters);
+      setOutputs(res.items);
+      setTotal(res.total || 0);
+      setPageIndex(params.pageIndex);
+    } catch (err: any) {
+      setError(err.message);
+    }
+  };
 
   const statusOptions = useMemo(() => ["ready"], []);
 
@@ -76,6 +90,8 @@ export default function OutputsPage() {
             pageSize={20}
             columns={columns}
             data={outputs}
+            serverPagination={{ pageIndex, pageSize: 20, total, onPageChange: (next) => setPageIndex(next) }}
+            serverOnChange={handleServerChange}
             emptyMessage="Chưa có dataset nào được tạo."
             renderToolbar={(table) => (
               <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">

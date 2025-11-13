@@ -84,3 +84,32 @@ class JobRepository(MongoRepositoryBase):
             .limit(limit)
         )
         return [self._serialize(doc) for doc in cursor]
+
+    def list_jobs_paginated(
+        self,
+        page: int = 1,
+        page_size: int = 20,
+        sort_by: Optional[str] = None,
+        sort_dir: str = "desc",
+        filters: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """Return paginated jobs and total count (page is 1-based)."""
+        if page < 1:
+            page = 1
+        skip = (page - 1) * page_size
+        collection = self.db[self.collections.jobs_collection]
+        query = filters or {}
+
+        allowed = {"created_at", "status", "sonar_instance"}
+        sort_field = sort_by if sort_by in allowed else "created_at"
+        sort_direction = -1 if sort_dir.lower() == "desc" else 1
+
+        total = collection.count_documents(query)
+        cursor = (
+            collection.find(query)
+            .sort(sort_field, sort_direction)
+            .skip(skip)
+            .limit(page_size)
+        )
+        items = [self._serialize(doc) for doc in cursor]
+        return {"items": items, "total": total}

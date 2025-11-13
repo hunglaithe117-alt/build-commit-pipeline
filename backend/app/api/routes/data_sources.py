@@ -2,11 +2,12 @@ from __future__ import annotations
 
 from datetime import datetime
 from pathlib import Path
-from typing import List, Optional
+from typing import Optional
+
+import json
 
 from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile
 from fastapi.concurrency import run_in_threadpool
-from pydantic import BaseModel, Field
 
 from app.models import DataSource
 from pipeline.ingestion import CSVIngestionPipeline
@@ -37,10 +38,28 @@ def _build_sonar_config(
     }
 
 
-@router.get("/", response_model=List[DataSource])
-async def list_data_sources() -> List[DataSource]:
-    records = await run_in_threadpool(repository.list_data_sources)
-    return [DataSource(**record) for record in records]
+@router.get("/")
+async def list_data_sources(
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=1000),
+    sort_by: Optional[str] = Query(default=None),
+    sort_dir: str = Query(default="desc"),
+    filters: Optional[str] = Query(default=None),
+) -> dict:
+
+    parsed_filters = json.loads(filters) if filters else None
+    result = await run_in_threadpool(
+        repository.list_data_sources_paginated,
+        page,
+        page_size,
+        sort_by,
+        sort_dir,
+        parsed_filters,
+    )
+    return {
+        "items": [DataSource(**record) for record in result["items"]],
+        "total": result["total"],
+    }
 
 
 @router.get("/{data_source_id}", response_model=DataSource)

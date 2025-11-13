@@ -18,7 +18,7 @@ celery_app = Celery(
 celery_app.conf.update(
     task_default_queue=settings.broker.default_queue,
     task_acks_late=True,
-    worker_prefetch_multiplier=2,
+    worker_prefetch_multiplier=1,
     worker_concurrency=settings.pipeline.sonar_parallelism,
     broker_connection_retry_on_startup=True,
     task_default_retry_delay=10,

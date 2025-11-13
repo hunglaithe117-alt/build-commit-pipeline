@@ -99,26 +99,36 @@ async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
   return (await response.json()) as T;
 }
 
+function buildPath(path: string, qs?: Record<string, any>) {
+  if (!qs) return path;
+  const params = new URLSearchParams();
+  for (const k of Object.keys(qs)) {
+    const v = qs[k];
+    if (v === undefined || v === null) continue;
+    params.append(k, String(v));
+  }
+  const suffix = params.toString();
+  return suffix ? `${path}?${suffix}` : path;
+}
+
 export const api = {
-  listDataSources: () => apiFetch<DataSource[]>("/api/data-sources"),
+  listDataSources: (limit?: number) => apiFetch<DataSource[]>(buildPath("/api/data-sources", { limit })),
+  listDataSourcesPaginated: (
+    page?: number,
+    pageSize?: number,
+    sortBy?: string,
+    sortDir?: string,
+    filters?: Record<string, any>
+  ) =>
+    apiFetch<{ items: DataSource[]; total: number }>(
+      buildPath("/api/data-sources", { page: page ?? 1, page_size: pageSize, sort_by: sortBy, sort_dir: sortDir, filters: filters ? JSON.stringify(filters) : undefined })
+    ),
   getDataSource: (id: string) => apiFetch<DataSource>(`/api/data-sources/${id}`),
-  uploadDataSource: async (
-    file: File,
-    name: string,
-    options?: { configContent?: string; configSource?: string; configFilename?: string }
-  ) => {
+  uploadDataSource: async (file: File, name: string, _options?: { configContent?: string; configSource?: string; configFilename?: string }) => {
     const formData = new FormData();
     formData.append("name_form", name);
+    // Only file-based sonar.properties uploads are supported from the UI.
     formData.append("file", file);
-    if (options?.configContent) {
-      formData.append("sonar_config_content", options.configContent);
-      if (options.configSource) {
-        formData.append("sonar_config_source", options.configSource);
-      }
-      if (options.configFilename) {
-        formData.append("sonar_config_filename", options.configFilename);
-      }
-    }
     const response = await fetch(`${API_BASE_URL}/api/data-sources`, {
       method: "POST",
       body: formData,
@@ -134,10 +144,50 @@ export const api = {
       body: JSON.stringify(payload),
     }),
   triggerCollection: (id: string) => apiFetch(`/api/data-sources/${id}/collect`, { method: "POST" }),
-  listJobs: () => apiFetch<Job[]>("/api/jobs"),
-  listRuns: () => apiFetch<SonarRun[]>("/api/sonar/runs"),
-  listOutputs: () => apiFetch<OutputDataset[]>("/api/outputs"),
-  listDeadLetters: () => apiFetch<DeadLetter[]>("/api/dead-letters"),
+  listJobs: (limit?: number) => apiFetch<Job[]>(buildPath("/api/jobs", { limit })),
+  listJobsPaginated: (
+    page?: number,
+    pageSize?: number,
+    sortBy?: string,
+    sortDir?: string,
+    filters?: Record<string, any>
+  ) =>
+    apiFetch<{ items: Job[]; total: number }>(
+      buildPath("/api/jobs", { page: page ?? 1, page_size: pageSize, sort_by: sortBy, sort_dir: sortDir, filters: filters ? JSON.stringify(filters) : undefined })
+    ),
+  listRuns: (limit?: number) => apiFetch<SonarRun[]>(buildPath("/api/sonar/runs", { limit })),
+  listRunsPaginated: (
+    page?: number,
+    pageSize?: number,
+    sortBy?: string,
+    sortDir?: string,
+    filters?: Record<string, any>
+  ) =>
+    apiFetch<{ items: SonarRun[]; total: number }>(
+      buildPath("/api/sonar/runs", { page: page ?? 1, page_size: pageSize, sort_by: sortBy, sort_dir: sortDir, filters: filters ? JSON.stringify(filters) : undefined })
+    ),
+  listOutputs: (limit?: number) => apiFetch<OutputDataset[]>(buildPath("/api/outputs", { limit })),
+  listOutputsPaginated: (
+    page?: number,
+    pageSize?: number,
+    sortBy?: string,
+    sortDir?: string,
+    filters?: Record<string, any>
+  ) =>
+    apiFetch<{ items: OutputDataset[]; total: number }>(
+      buildPath("/api/outputs", { page: page ?? 1, page_size: pageSize, sort_by: sortBy, sort_dir: sortDir, filters: filters ? JSON.stringify(filters) : undefined })
+    ),
+  listDeadLetters: (limit?: number) => apiFetch<DeadLetter[]>(buildPath("/api/dead-letters", { limit })),
+  listDeadLettersPaginated: (
+    page?: number,
+    pageSize?: number,
+    sortBy?: string,
+    sortDir?: string,
+    filters?: Record<string, any>
+  ) =>
+    apiFetch<{ items: DeadLetter[]; total: number }>(
+      buildPath("/api/dead-letters", { page: page ?? 1, page_size: pageSize, sort_by: sortBy, sort_dir: sortDir, filters: filters ? JSON.stringify(filters) : undefined })
+    ),
   updateDeadLetter: (id: string, payload: { config_override: string; config_source?: string }) =>
     apiFetch<DeadLetter>(`/api/dead-letters/${id}`, {
       method: "PUT",

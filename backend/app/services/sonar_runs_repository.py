@@ -62,7 +62,7 @@ class SonarRunsRepository(MongoRepositoryBase):
         )
         return self._serialize(doc)
 
-    def list_sonar_runs(self, limit: int = 100) -> List[Dict[str, Any]]:
+    def list_sonar_runs(self, limit: int = 50) -> List[Dict[str, Any]]:
         cursor = (
             self.db[self.collections.sonar_runs_collection]
             .find()
@@ -70,6 +70,37 @@ class SonarRunsRepository(MongoRepositoryBase):
             .limit(limit)
         )
         return [self._serialize(doc) for doc in cursor]
+
+    def list_sonar_runs_paginated(
+        self,
+        page: int = 1,
+        page_size: int = 50,
+        sort_by: Optional[str] = None,
+        sort_dir: str = "desc",
+        filters: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        if page < 1:
+            page = 1
+        skip = (page - 1) * page_size
+        collection = self.db[self.collections.sonar_runs_collection]
+        query = filters or {}
+
+        allowed = {"started_at", "project_key", "status", "analysis_id", "finished_at"}
+        if sort_by not in allowed:
+            sort_field = "started_at"
+        else:
+            sort_field = sort_by
+        sort_direction = -1 if sort_dir.lower() == "desc" else 1
+
+        total = collection.count_documents(query)
+        cursor = (
+            collection.find(query)
+            .sort(sort_field, sort_direction)
+            .skip(skip)
+            .limit(page_size)
+        )
+        items = [self._serialize(doc) for doc in cursor]
+        return {"items": items, "total": total}
 
     def find_sonar_run_by_component(
         self, component_key: str

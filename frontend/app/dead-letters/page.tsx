@@ -16,20 +16,31 @@ export default function DeadLettersPage() {
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [selected, setSelected] = useState<DeadLetter | null>(null);
+  const selectedRef = useRef<DeadLetter | null>(null);
   const [configDraft, setConfigDraft] = useState("");
   const [actionMessage, setActionMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [pageIndex, setPageIndex] = useState(0);
+  const [total, setTotal] = useState(0);
 
   const refresh = useCallback(async () => {
     setLoading(true);
     try {
-      const data = await api.listDeadLetters();
-      setItems(data);
-      if (selected) {
-        const next = data.find((item) => item.id === selected.id);
+      const res = await api.listDeadLettersPaginated(pageIndex + 1, 20);
+      setItems(res.items);
+      setTotal(res.total || 0);
+      const data = res.items;
+      // Keep the currently-selected item in sync with latest server data,
+      // but reference the selection via a ref so refresh stays stable and
+      // doesn't trigger an effect loop when `selected` is updated with a
+      // new object reference from the server.
+      const cur = selectedRef.current;
+      if (cur) {
+        const next = data.find((item: DeadLetter) => item.id === cur.id);
         if (next) {
           setSelected(next);
+          selectedRef.current = next;
         }
       }
     } catch (error: any) {
@@ -37,7 +48,36 @@ export default function DeadLettersPage() {
     } finally {
       setLoading(false);
     }
-  }, [selected]);
+  }, []);
+
+  const handleServerChange = async (params: {
+    pageIndex: number;
+    pageSize: number;
+    sorting?: { id: string; desc?: boolean } | null;
+    filters: Record<string, any>;
+  }) => {
+    setLoading(true);
+    try {
+      const sortBy = params.sorting?.id;
+      const sortDir = params.sorting?.desc ? "desc" : "asc";
+      const res = await api.listDeadLettersPaginated(params.pageIndex + 1, params.pageSize, sortBy, sortDir, params.filters);
+      setItems(res.items);
+      setTotal(res.total || 0);
+      const cur = selectedRef.current;
+      if (cur) {
+        const next = res.items.find((item: DeadLetter) => item.id === cur.id);
+        if (next) {
+          setSelected(next);
+          selectedRef.current = next;
+        }
+      }
+      setPageIndex(params.pageIndex);
+    } catch (error: any) {
+      setMessage(error.message);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
     refresh().catch(() => setLoading(false));
@@ -50,6 +90,7 @@ export default function DeadLettersPage() {
 
   const handleSelect = useCallback((row: DeadLetter) => {
     setSelected(row);
+    selectedRef.current = row;
   }, []);
 
   const handleImportFile = (file: File | null) => {
@@ -80,8 +121,9 @@ export default function DeadLettersPage() {
         config_override: configDraft,
         config_source: "text",
       });
-      setItems((prev) => prev.map((item) => (item.id === updated.id ? updated : item)));
-      setSelected(updated);
+  setItems((prev) => prev.map((item) => (item.id === updated.id ? updated : item)));
+  setSelected(updated);
+  selectedRef.current = updated;
       setActionMessage("Đã lưu cấu hình.");
     } catch (error: any) {
       setActionMessage(error.message);
@@ -104,8 +146,9 @@ export default function DeadLettersPage() {
         config_override: configDraft,
         config_source: "text",
       });
-      setItems((prev) => prev.map((item) => (item.id === updated.id ? updated : item)));
-      setSelected(updated);
+  setItems((prev) => prev.map((item) => (item.id === updated.id ? updated : item)));
+  setSelected(updated);
+  selectedRef.current = updated;
       setActionMessage("Đã gửi commit chạy lại.");
     } catch (error: any) {
       setActionMessage(error.message);
@@ -176,9 +219,16 @@ export default function DeadLettersPage() {
         </CardHeader>
         <CardContent>
           <DataTable
-            pageSize={50}
+            pageSize={20}
             columns={columns}
             data={items}
+            serverPagination={{
+              pageIndex,
+              pageSize: 20,
+              total,
+              onPageChange: (next) => setPageIndex(next),
+            }}
+            serverOnChange={handleServerChange}
             emptyMessage={loading ? "Đang tải..." : "Không có commit lỗi nào."}
             renderToolbar={(table) => (
               <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">

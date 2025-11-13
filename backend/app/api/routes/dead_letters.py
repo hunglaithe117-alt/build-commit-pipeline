@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from typing import List, Optional
+from typing import Optional
+import json
 
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.concurrency import run_in_threadpool
@@ -14,7 +15,9 @@ router = APIRouter()
 
 
 class DeadLetterUpdateRequest(BaseModel):
-    config_override: str = Field(..., description="sonar-project.properties content override")
+    config_override: str = Field(
+        ..., description="sonar-project.properties content override"
+    )
     config_source: Optional[str] = Field(default="text")
 
 
@@ -23,10 +26,28 @@ class DeadLetterRetryRequest(BaseModel):
     config_source: Optional[str] = None
 
 
-@router.get("/", response_model=List[DeadLetter])
-async def list_dead_letters(limit: int = Query(default=200, le=1000)) -> List[DeadLetter]:
-    records = await run_in_threadpool(repository.list_dead_letters, limit)
-    return [DeadLetter(**record) for record in records]
+@router.get("/")
+async def list_dead_letters(
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=1000),
+    sort_by: Optional[str] = Query(default=None),
+    sort_dir: str = Query(default="desc"),
+    filters: Optional[str] = Query(default=None),
+) -> dict:
+
+    parsed_filters = json.loads(filters) if filters else None
+    result = await run_in_threadpool(
+        repository.list_dead_letters_paginated,
+        page,
+        page_size,
+        sort_by,
+        sort_dir,
+        parsed_filters,
+    )
+    return {
+        "items": [DeadLetter(**record) for record in result["items"]],
+        "total": result["total"],
+    }
 
 
 @router.get("/{dead_letter_id}", response_model=DeadLetter)

@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 class DataSourceStatus(str, Enum):
     pending = "pending"
     ready = "ready"
+    succeeded = "succeeded"
     processing = "processing"
     failed = "failed"
 

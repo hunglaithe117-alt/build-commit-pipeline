@@ -35,6 +35,18 @@ type DataTableProps<TData, TValue> = {
   className?: string;
   pageSize?: number;
   renderToolbar?: (table: TanStackTable<TData>) => React.ReactNode;
+  serverPagination?: {
+    pageIndex: number;
+    pageSize: number;
+    total: number;
+    onPageChange: (newPageIndex: number) => void;
+  };
+  serverOnChange?: (params: {
+    pageIndex: number;
+    pageSize: number;
+    sorting?: { id: string; desc?: boolean } | null;
+    filters: Record<string, any>;
+  }) => void;
 };
 
 export function DataTable<TData, TValue>({
@@ -44,6 +56,8 @@ export function DataTable<TData, TValue>({
   className,
   pageSize = 10,
   renderToolbar,
+  serverPagination,
+  serverOnChange,
 }: DataTableProps<TData, TValue>) {
   const [sorting, setSorting] = React.useState<SortingState>([]);
   const [columnFilters, setColumnFilters] = React.useState<ColumnFiltersState>([]);
@@ -72,6 +86,17 @@ export function DataTable<TData, TValue>({
     getFilteredRowModel: getFilteredRowModel(),
     getPaginationRowModel: getPaginationRowModel(),
   });
+
+  React.useEffect(() => {
+    if (!serverOnChange) return;
+    const sort = sorting && sorting.length > 0 ? sorting[0] : null;
+    const filtersObj: Record<string, any> = {};
+    columnFilters.forEach((f) => {
+      filtersObj[f.id] = f.value;
+    });
+    serverOnChange({ pageIndex: pagination.pageIndex, pageSize: pagination.pageSize, sorting: sort, filters: filtersObj });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pagination.pageIndex, pagination.pageSize, JSON.stringify(sorting), JSON.stringify(columnFilters)]);
 
   return (
     <div className={cn("rounded-lg border", className)}>
@@ -111,18 +136,47 @@ export function DataTable<TData, TValue>({
         </TableBody>
       </Table>
       <div className="flex items-center justify-between px-4 py-3">
-        <p className="text-sm text-muted-foreground">
-          Trang {table.getState().pagination.pageIndex + 1} /{" "}
-          {Math.max(table.getPageCount(), 1)}
-        </p>
-        <div className="space-x-2">
-          <Button variant="outline" size="sm" disabled={!table.getCanPreviousPage()} onClick={() => table.previousPage()}>
-            Trang trước
-          </Button>
-          <Button variant="outline" size="sm" disabled={!table.getCanNextPage()} onClick={() => table.nextPage()}>
-            Trang sau
-          </Button>
-        </div>
+        {serverPagination ? (
+          // Server-controlled pagination UI
+          <>
+            <p className="text-sm text-muted-foreground">
+              Trang {serverPagination.pageIndex + 1} / {Math.max(Math.ceil(serverPagination.total / serverPagination.pageSize), 1)}
+            </p>
+            <div className="space-x-2">
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={serverPagination.pageIndex <= 0}
+                onClick={() => serverPagination.onPageChange(Math.max(0, serverPagination.pageIndex - 1))}
+              >
+                Trang trước
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={(serverPagination.pageIndex + 1) * serverPagination.pageSize >= serverPagination.total}
+                onClick={() => serverPagination.onPageChange(serverPagination.pageIndex + 1)}
+              >
+                Trang sau
+              </Button>
+            </div>
+          </>
+        ) : (
+          // Client-side pagination UI
+          <>
+            <p className="text-sm text-muted-foreground">
+              Trang {table.getState().pagination.pageIndex + 1} / {Math.max(table.getPageCount(), 1)}
+            </p>
+            <div className="space-x-2">
+              <Button variant="outline" size="sm" disabled={!table.getCanPreviousPage()} onClick={() => table.previousPage()}>
+                Trang trước
+              </Button>
+              <Button variant="outline" size="sm" disabled={!table.getCanNextPage()} onClick={() => table.nextPage()}>
+                Trang sau
+              </Button>
+            </div>
+          </>
+        )}
       </div>
     </div>
   );

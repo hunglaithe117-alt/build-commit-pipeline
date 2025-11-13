@@ -13,10 +13,38 @@ import { api, Job } from "@/lib/api";
 export default function JobsPage() {
   const [jobs, setJobs] = useState<Job[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [pageIndex, setPageIndex] = useState(0);
+  const [total, setTotal] = useState(0);
 
   const refresh = async () => {
-    const data = await api.listJobs();
-    setJobs(data);
+    const res = await api.listJobsPaginated(pageIndex + 1, 20);
+    setJobs(res.items);
+    setTotal(res.total || 0);
+  };
+
+  const handleServerChange = async (params: {
+    pageIndex: number;
+    pageSize: number;
+    sorting?: { id: string; desc?: boolean } | null;
+    filters: Record<string, any>;
+  }) => {
+    setError(null);
+    try {
+      const sortBy = params.sorting?.id;
+      const sortDir = params.sorting?.desc ? "desc" : "asc";
+      const res = await api.listJobsPaginated(
+        params.pageIndex + 1,
+        params.pageSize,
+        sortBy,
+        sortDir,
+        params.filters
+      );
+      setJobs(res.items);
+      setTotal(res.total || 0);
+      setPageIndex(params.pageIndex);
+    } catch (err: any) {
+      setError(err.message);
+    }
   };
 
   useEffect(() => {
@@ -27,20 +55,30 @@ export default function JobsPage() {
     return () => clearInterval(interval);
   }, []);
 
-  const statusOptions = useMemo(() => Array.from(new Set(jobs.map((item) => item.status))).sort(), [jobs]);
+  useEffect(() => {
+    refresh().catch((err) => setError(err.message));
+  }, [pageIndex]);
+
+  const statusOptions = useMemo(
+    () => Array.from(new Set(jobs.map((item) => item.status))).sort(),
+    [jobs]
+  );
 
   const columns = useMemo<ColumnDef<Job>[]>(() => {
     return [
       {
         accessorKey: "id",
         header: "Job",
-        cell: ({ row }) => <span className="font-medium">{row.original.id.slice(-8)}</span>,
+        cell: ({ row }) => (
+          <span className="font-medium">{row.original.id.slice(-8)}</span>
+        ),
       },
       {
         id: "project",
         header: "Project",
         accessorFn: (row) => row.sonar_instance || row.id,
-        cell: ({ row }) => row.original.sonar_instance || row.original.id.slice(-8),
+        cell: ({ row }) =>
+          row.original.sonar_instance || row.original.id.slice(-8),
       },
       {
         accessorKey: "processed",
@@ -57,17 +95,25 @@ export default function JobsPage() {
       {
         accessorKey: "current_commit",
         header: "Commit đang chạy",
-        cell: ({ row }) => <span className="font-mono text-xs">{row.original.current_commit || "-"}</span>,
+        cell: ({ row }) => (
+          <span className="font-mono text-xs">
+            {row.original.current_commit || "-"}
+          </span>
+        ),
       },
       {
         id: "progress",
         header: "Tiến độ",
         cell: ({ row }) => {
-          const progress = row.original.total ? Math.round((row.original.processed / row.original.total) * 100) : 0;
+          const progress = row.original.total
+            ? Math.round((row.original.processed / row.original.total) * 100)
+            : 0;
           return (
             <div className="flex items-center gap-3">
               <Progress value={progress} className="w-40" />
-              <span className="text-sm font-medium text-slate-700">{progress}%</span>
+              <span className="text-sm font-medium text-slate-700">
+                {progress}%
+              </span>
             </div>
           );
         },
@@ -92,21 +138,44 @@ export default function JobsPage() {
             pageSize={20}
             columns={columns}
             data={jobs}
+            serverPagination={{
+              pageIndex,
+              pageSize: 20,
+              total,
+              onPageChange: (next) => setPageIndex(next),
+            }}
+            serverOnChange={handleServerChange}
             emptyMessage="Chưa có job nào chạy gần đây."
             renderToolbar={(table) => (
               <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
                 <Input
                   className="md:max-w-xs"
                   placeholder="Lọc theo project..."
-                  value={(table.getColumn("project")?.getFilterValue() as string) ?? ""}
-                  onChange={(event) => table.getColumn("project")?.setFilterValue(event.target.value)}
+                  value={
+                    (table.getColumn("project")?.getFilterValue() as string) ??
+                    ""
+                  }
+                  onChange={(event) =>
+                    table
+                      .getColumn("project")
+                      ?.setFilterValue(event.target.value)
+                  }
                 />
                 <div className="flex items-center gap-2">
-                  <span className="text-sm text-muted-foreground">Trạng thái</span>
+                  <span className="text-sm text-muted-foreground">
+                    Trạng thái
+                  </span>
                   <select
                     className="h-10 rounded-md border border-input bg-background px-3 text-sm"
-                    value={(table.getColumn("status")?.getFilterValue() as string) ?? ""}
-                    onChange={(event) => table.getColumn("status")?.setFilterValue(event.target.value || undefined)}
+                    value={
+                      (table.getColumn("status")?.getFilterValue() as string) ??
+                      ""
+                    }
+                    onChange={(event) =>
+                      table
+                        .getColumn("status")
+                        ?.setFilterValue(event.target.value || undefined)
+                    }
                   >
                     <option value="">Tất cả</option>
                     {statusOptions.map((status) => (

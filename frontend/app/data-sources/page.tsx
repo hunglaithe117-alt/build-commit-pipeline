@@ -21,18 +21,29 @@ export default function DataSourcesPage() {
   const [name, setName] = useState("");
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
-  const [configMode, setConfigMode] = useState<"none" | "file" | "text">("none");
+  const [configMode, setConfigMode] = useState<"none" | "file" | "text">(
+    "none"
+  );
   const [configContent, setConfigContent] = useState("");
   const [configFilename, setConfigFilename] = useState<string | null>(null);
 
+  const [pageIndex, setPageIndex] = useState(0);
+  const [total, setTotal] = useState(0);
+
   const refresh = useCallback(async () => {
-    const list = await api.listDataSources();
-    setDataSources(list);
-  }, []);
+    const res = await api.listDataSourcesPaginated(pageIndex + 1, 20);
+    setDataSources(res.items);
+    setTotal(res.total || 0);
+  }, [pageIndex]);
 
   useEffect(() => {
     refresh().catch((err) => setMessage(err.message));
   }, [refresh]);
+
+  useEffect(() => {
+    // refresh when page index changes
+    refresh().catch((err) => setMessage(err.message));
+  }, [pageIndex, refresh]);
 
   const totals = useMemo(() => {
     if (!dataSources.length) {
@@ -48,25 +59,46 @@ export default function DataSourcesPage() {
     );
   }, [dataSources]);
 
-  const handleConfigFile = useCallback(
-    (configFile: File | null) => {
-      if (!configFile) {
-        setConfigContent("");
-        setConfigFilename(null);
-        return;
-      }
-      const reader = new FileReader();
-      reader.onload = () => {
-        setConfigContent(typeof reader.result === "string" ? reader.result : "");
-        setConfigFilename(configFile.name);
-      };
-      reader.onerror = () => {
-        setMessage("Không thể đọc file sonar.properties");
-      };
-      reader.readAsText(configFile);
-    },
-    []
-  );
+  const handleServerChange = async (params: {
+    pageIndex: number;
+    pageSize: number;
+    sorting?: { id: string; desc?: boolean } | null;
+    filters: Record<string, any>;
+  }) => {
+    try {
+      const sortBy = params.sorting?.id;
+      const sortDir = params.sorting?.desc ? "desc" : "asc";
+      const res = await api.listDataSourcesPaginated(
+        params.pageIndex + 1,
+        params.pageSize,
+        sortBy,
+        sortDir,
+        params.filters
+      );
+      setDataSources(res.items);
+      setTotal(res.total || 0);
+      setPageIndex(params.pageIndex);
+    } catch (err: any) {
+      setMessage(err.message);
+    }
+  };
+
+  const handleConfigFile = useCallback((configFile: File | null) => {
+    if (!configFile) {
+      setConfigContent("");
+      setConfigFilename(null);
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      setConfigContent(typeof reader.result === "string" ? reader.result : "");
+      setConfigFilename(configFile.name);
+    };
+    reader.onerror = () => {
+      setMessage("Không thể đọc file sonar.properties");
+    };
+    reader.readAsText(configFile);
+  }, []);
 
   const handleUpload = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -118,20 +150,29 @@ export default function DataSourcesPage() {
     [refresh]
   );
 
-  const statusOptions = useMemo(() => Array.from(new Set(dataSources.map((item) => item.status))).sort(), [dataSources]);
+  const statusOptions = useMemo(
+    () => Array.from(new Set(dataSources.map((item) => item.status))).sort(),
+    [dataSources]
+  );
 
   const columns = useMemo<ColumnDef<DataSource>[]>(() => {
     return [
       {
         accessorKey: "name",
         header: "Tên",
-        cell: ({ row }) => <span className="font-medium">{row.original.name}</span>,
+        cell: ({ row }) => (
+          <span className="font-medium">{row.original.name}</span>
+        ),
       },
       {
         id: "project",
         header: "Project",
-        accessorFn: (row) => row.stats?.project_name || row.stats?.project_key || "",
-        cell: ({ row }) => row.original.stats?.project_name || row.original.stats?.project_key || "-",
+        accessorFn: (row) =>
+          row.stats?.project_name || row.stats?.project_key || "",
+        cell: ({ row }) =>
+          row.original.stats?.project_name ||
+          row.original.stats?.project_key ||
+          "-",
       },
       {
         accessorKey: "total_builds",
@@ -161,7 +202,11 @@ export default function DataSourcesPage() {
             <Button size="sm" variant="ghost" asChild>
               <Link href={`/data-sources/${row.original.id}`}>Cấu hình</Link>
             </Button>
-            <Button size="sm" variant="outline" onClick={() => triggerJob(row.original.id)}>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => triggerJob(row.original.id)}
+            >
               Thu thập
             </Button>
           </div>
@@ -173,7 +218,11 @@ export default function DataSourcesPage() {
   return (
     <section className="space-y-8">
       <div className="grid gap-4 md:grid-cols-3">
-        <MetricCard label="Số nguồn dữ liệu" value={dataSources.length} hint="CSV đã upload" />
+        <MetricCard
+          label="Số nguồn dữ liệu"
+          value={dataSources.length}
+          hint="CSV đã upload"
+        />
         <MetricCard label="Tổng builds" value={totals.builds} />
         <MetricCard label="Tổng commits" value={totals.commits} />
       </div>
@@ -183,7 +232,10 @@ export default function DataSourcesPage() {
           <CardTitle className="text-xl">Tải CSV TravisTorrent</CardTitle>
         </CardHeader>
         <CardContent>
-          <form className="flex flex-col gap-4 md:flex-row md:items-end" onSubmit={handleUpload}>
+          <form
+            className="flex flex-col gap-4 md:flex-row md:items-end"
+            onSubmit={handleUpload}
+          >
             <div className="w-full space-y-2 md:flex-1">
               <Label htmlFor="csv-upload">File CSV</Label>
               <Input
@@ -241,9 +293,15 @@ export default function DataSourcesPage() {
                 <input
                   type="file"
                   accept=".properties,.txt"
-                  onChange={(event) => handleConfigFile(event.target.files?.[0] || null)}
+                  onChange={(event) =>
+                    handleConfigFile(event.target.files?.[0] || null)
+                  }
                 />
-                {configFilename && <p className="text-sm text-muted-foreground">Đã chọn: {configFilename}</p>}
+                {configFilename && (
+                  <p className="text-sm text-muted-foreground">
+                    Đã chọn: {configFilename}
+                  </p>
+                )}
               </div>
             )}
             {configMode === "text" && (
@@ -254,7 +312,9 @@ export default function DataSourcesPage() {
               />
             )}
             {configMode === "none" && (
-              <p className="text-sm text-muted-foreground">Giữ nguyên cấu hình mặc định của pipeline.</p>
+              <p className="text-sm text-muted-foreground">
+                Giữ nguyên cấu hình mặc định của pipeline.
+              </p>
             )}
           </div>
         </CardContent>
@@ -264,7 +324,9 @@ export default function DataSourcesPage() {
         <CardHeader className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
           <div>
             <CardTitle className="text-xl">Danh sách nguồn dữ liệu</CardTitle>
-            <p className="text-sm text-muted-foreground">Quản lý các kho TravisTorrent đã upload</p>
+            <p className="text-sm text-muted-foreground">
+              Quản lý các kho TravisTorrent đã upload
+            </p>
           </div>
           <Badge variant="secondary">{dataSources.length} datasets</Badge>
         </CardHeader>
@@ -273,21 +335,44 @@ export default function DataSourcesPage() {
             pageSize={20}
             columns={columns}
             data={dataSources}
+            serverPagination={{
+              pageIndex,
+              pageSize: 20,
+              total,
+              onPageChange: (next) => setPageIndex(next),
+            }}
+            serverOnChange={handleServerChange}
             emptyMessage="Chưa có dữ liệu. Hãy upload file CSV đầu tiên của bạn."
             renderToolbar={(table) => (
               <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
                 <Input
                   className="md:max-w-xs"
                   placeholder="Lọc theo project..."
-                  value={(table.getColumn("project")?.getFilterValue() as string) ?? ""}
-                  onChange={(event) => table.getColumn("project")?.setFilterValue(event.target.value)}
+                  value={
+                    (table.getColumn("project")?.getFilterValue() as string) ??
+                    ""
+                  }
+                  onChange={(event) =>
+                    table
+                      .getColumn("project")
+                      ?.setFilterValue(event.target.value)
+                  }
                 />
                 <div className="flex items-center gap-2">
-                  <span className="text-sm text-muted-foreground">Trạng thái</span>
+                  <span className="text-sm text-muted-foreground">
+                    Trạng thái
+                  </span>
                   <select
                     className="h-10 rounded-md border border-input bg-background px-3 text-sm"
-                    value={(table.getColumn("status")?.getFilterValue() as string) ?? ""}
-                    onChange={(event) => table.getColumn("status")?.setFilterValue(event.target.value || undefined)}
+                    value={
+                      (table.getColumn("status")?.getFilterValue() as string) ??
+                      ""
+                    }
+                    onChange={(event) =>
+                      table
+                        .getColumn("status")
+                        ?.setFilterValue(event.target.value || undefined)
+                    }
                   >
                     <option value="">Tất cả</option>
                     {statusOptions.map((status) => (

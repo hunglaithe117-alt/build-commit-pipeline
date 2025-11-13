@@ -3,9 +3,9 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
-from typing import List, Optional
+from typing import Optional
 
-from fastapi import APIRouter, Header, HTTPException, Request
+from fastapi import APIRouter, Header, HTTPException, Request, Query
 from fastapi.concurrency import run_in_threadpool
 
 from app.core.config import settings
@@ -17,10 +17,19 @@ import logging
 router = APIRouter()
 LOG = logging.getLogger("sonar_api")
 
-@router.get("/runs", response_model=List[SonarRun])
-async def list_runs() -> List[SonarRun]:
-    runs = await run_in_threadpool(repository.list_sonar_runs)
-    return [SonarRun(**run) for run in runs]
+@router.get("/runs")
+async def list_runs(
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=50, ge=1, le=1000),
+    sort_by: Optional[str] = Query(default=None),
+    sort_dir: str = Query(default="desc"),
+    filters: Optional[str] = Query(default=None),
+) -> dict:
+    parsed_filters = json.loads(filters) if filters else None
+    result = await run_in_threadpool(
+        repository.list_sonar_runs_paginated, page, page_size, sort_by, sort_dir, parsed_filters
+    )
+    return {"items": [SonarRun(**run) for run in result["items"]], "total": result["total"]}
 
 
 def _validate_signature(body: bytes, signature: Optional[str], token_header: Optional[str]) -> None:
@@ -46,7 +55,7 @@ async def sonar_webhook(
     body = await request.body()
     _validate_signature(body, x_sonar_webhook_hmac_sha256, x_sonar_secret)
     payload = json.loads(body.decode("utf-8") or "{}")
-    LOG.info("Received SonarQube webhook: %s", payload)
+    LOG.debug("Received SonarQube webhook: %s", payload)
     component_key = payload.get("project", {}).get("key")
     if not component_key:
         raise HTTPException(status_code=400, detail="project key missing")

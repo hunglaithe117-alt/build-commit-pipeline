@@ -12,13 +12,27 @@ import { api, SonarRun } from "@/lib/api";
 export default function SonarRunsPage() {
   const [runs, setRuns] = useState<SonarRun[]>([]);
   const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    api
-      .listRuns()
-      .then(setRuns)
-      .catch((err) => setError(err.message));
-  }, []);
+  const [pageIndex, setPageIndex] = useState(0);
+  const [total, setTotal] = useState(0);
+  
+  const handleServerChange = async (params: {
+    pageIndex: number;
+    pageSize: number;
+    sorting?: { id: string; desc?: boolean } | null;
+    filters: Record<string, any>;
+  }) => {
+    setError(null);
+    try {
+      const sortBy = params.sorting?.id;
+      const sortDir = params.sorting?.desc ? "desc" : "asc";
+      const res = await api.listRunsPaginated(params.pageIndex + 1, params.pageSize, sortBy, sortDir, params.filters);
+      setRuns(res.items);
+      setTotal(res.total || 0);
+      setPageIndex(params.pageIndex);
+    } catch (err: any) {
+      setError(err.message);
+    }
+  };
 
   const statusOptions = useMemo(() => Array.from(new Set(runs.map((item) => item.status))).sort(), [runs]);
 
@@ -100,6 +114,8 @@ export default function SonarRunsPage() {
             pageSize={50}
             columns={columns}
             data={runs}
+            serverPagination={{ pageIndex, pageSize: 50, total, onPageChange: (next) => setPageIndex(next) }}
+            serverOnChange={handleServerChange}
             emptyMessage="Chưa có Sonar run nào."
             renderToolbar={(table) => (
               <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">

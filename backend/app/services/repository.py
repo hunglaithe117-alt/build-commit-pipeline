@@ -45,11 +45,6 @@ class Repository:
     def list_jobs(self, *a, **k):
         return self.jobs.list_jobs(*a, **k)
 
-    # NOTE: instance lock management removed in single-SonarQube architecture.
-    # Legacy code previously delegated to InstanceLocksRepository. If you
-    # later reintroduce multi-instance pooling, re-add the repository and
-    # restore these methods.
-
     # Sonar runs
     def upsert_sonar_run(self, *a, **k):
         return self.sonar_runs.upsert_sonar_run(*a, **k)
