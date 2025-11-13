@@ -26,7 +26,7 @@ _RUNNER_CACHE: Dict[tuple[str, str], "SonarCommitRunner"] = {}
 @dataclass
 class CommitScanResult:
     component_key: str
-    log_path: Path
+    log_path: Optional[Path]
     output: str
     instance_name: str
     skipped: bool = False
@@ -77,9 +77,7 @@ class SonarCommitRunner:
         self.config_dir.mkdir(parents=True, exist_ok=True)
         self.repo_lock_path = self.work_dir / ".repo.lock"
         self.repo_lock_path.touch(exist_ok=True)
-        self.logs_dir = self.work_dir / "logs"
         self.work_dir.mkdir(parents=True, exist_ok=True)
-        self.logs_dir.mkdir(parents=True, exist_ok=True)
         self.host = self.instance.host.rstrip("/")
         self.token = self.instance.resolved_token()
         self.session = requests.Session()
@@ -239,9 +237,7 @@ class SonarCommitRunner:
     ) -> CommitScanResult:
         component_key = f"{self.project_key}_{commit_sha}"
         if self.project_exists(component_key):
-            log_path = self.logs_dir / f"{commit_sha}.log"
             message = f"Component {component_key} already exists on {self.instance.name}; skipping scan."
-            log_path.write_text(message, encoding="utf-8")
             LOG.info(message)
             
             # Upload log to S3 if enabled
@@ -254,7 +250,7 @@ class SonarCommitRunner:
             
             return CommitScanResult(
                 component_key=component_key,
-                log_path=log_path,
+                log_path=None,
                 output=message,
                 instance_name=self.instance.name,
                 skipped=True,
@@ -262,7 +258,6 @@ class SonarCommitRunner:
             )
 
         worktree: Optional[Path] = None
-        log_path = self.logs_dir / f"{commit_sha}.log"
         s3_log_key: Optional[str] = None
         try:
             with self.repo_mutex():
@@ -298,7 +293,6 @@ class SonarCommitRunner:
             )
             LOG.debug("Scanning commit %s with command: %s", commit_sha, " ".join(cmd))
             output = run_command(cmd, cwd=worktree)
-            log_path.write_text(output, encoding="utf-8")
             
             # Upload log to S3 if enabled
             s3_log_key = s3_service.upload_sonar_log(
@@ -310,17 +304,16 @@ class SonarCommitRunner:
             
             return CommitScanResult(
                 component_key=component_key,
-                log_path=log_path,
+                log_path=None,
                 output=output,
                 instance_name=self.instance.name,
                 s3_log_key=s3_log_key,
             )
         except Exception as exc:
             error_message = str(exc)
-            log_path.write_text(error_message, encoding="utf-8")
             
             # Upload error log to S3 if enabled
-            s3_log_key = s3_service.upload_sonar_log(
+            s3_service.upload_sonar_log(
                 log_content=error_message,
                 project_key=self.project_key,
                 commit_sha=commit_sha,
