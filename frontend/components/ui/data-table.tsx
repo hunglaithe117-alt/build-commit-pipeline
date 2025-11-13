@@ -87,6 +87,17 @@ export function DataTable<TData, TValue>({
     getPaginationRowModel: getPaginationRowModel(),
   });
 
+  // Debug: log serverPagination prop changes to help trace why page changes
+  React.useEffect(() => {
+    if (!serverPagination) return;
+    // eslint-disable-next-line no-console
+    console.debug("DataTable: serverPagination changed", {
+      pageIndex: serverPagination.pageIndex,
+      pageSize: serverPagination.pageSize,
+      total: serverPagination.total,
+    });
+  }, [serverPagination?.pageIndex, serverPagination?.pageSize, serverPagination?.total]);
+
   React.useEffect(() => {
     if (!serverOnChange) return;
     const sort = sorting && sorting.length > 0 ? sorting[0] : null;
@@ -147,7 +158,11 @@ export function DataTable<TData, TValue>({
                 variant="outline"
                 size="sm"
                 disabled={serverPagination.pageIndex <= 0}
-                onClick={() => serverPagination.onPageChange(Math.max(0, serverPagination.pageIndex - 1))}
+                onClick={() => {
+                  // eslint-disable-next-line no-console
+                  console.debug("DataTable: server prev clicked", { current: serverPagination.pageIndex, next: Math.max(0, serverPagination.pageIndex - 1) });
+                  serverPagination.onPageChange(Math.max(0, serverPagination.pageIndex - 1));
+                }}
               >
                 Trang trước
               </Button>
@@ -155,7 +170,11 @@ export function DataTable<TData, TValue>({
                 variant="outline"
                 size="sm"
                 disabled={(serverPagination.pageIndex + 1) * serverPagination.pageSize >= serverPagination.total}
-                onClick={() => serverPagination.onPageChange(serverPagination.pageIndex + 1)}
+                onClick={() => {
+                  // eslint-disable-next-line no-console
+                  console.debug("DataTable: server next clicked", { current: serverPagination.pageIndex, next: serverPagination.pageIndex + 1 });
+                  serverPagination.onPageChange(serverPagination.pageIndex + 1);
+                }}
               >
                 Trang sau
               </Button>
