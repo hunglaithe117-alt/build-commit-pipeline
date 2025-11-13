@@ -16,12 +16,6 @@ export default function JobsPage() {
   const [pageIndex, setPageIndex] = useState(0);
   const [total, setTotal] = useState(0);
 
-  const refresh = async () => {
-    const res = await api.listJobsPaginated(pageIndex + 1, 20);
-    setJobs(res.items);
-    setTotal(res.total || 0);
-  };
-
   const handleServerChange = async (params: {
     pageIndex: number;
     pageSize: number;
@@ -48,15 +42,22 @@ export default function JobsPage() {
   };
 
   useEffect(() => {
-    refresh().catch((err) => setError(err.message));
+    handleServerChange({
+      pageIndex: 0,
+      pageSize: 20,
+      sorting: null,
+      filters: {},
+    }).catch((err) => setError(err.message));
+
     const interval = setInterval(() => {
-      refresh().catch(console.error);
+      handleServerChange({
+        pageIndex,
+        pageSize: 20,
+        sorting: null,
+        filters: {},
+      }).catch(console.error);
     }, 5000);
     return () => clearInterval(interval);
-  }, []);
-
-  useEffect(() => {
-    refresh().catch((err) => setError(err.message));
   }, [pageIndex]);
 
   const statusOptions = useMemo(

@@ -71,6 +71,9 @@ class Repository:
     def list_dead_letters(self, *a, **k):
         return self.dead_letters.list_dead_letters(*a, **k)
 
+    def list_dead_letters_paginated(self, *a, **k):
+        return self.dead_letters.list_dead_letters_paginated(*a, **k)
+
     def get_dead_letter(self, *a, **k):
         return self.dead_letters.get_dead_letter(*a, **k)
 

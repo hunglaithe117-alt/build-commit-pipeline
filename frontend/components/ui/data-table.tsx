@@ -87,7 +87,6 @@ export function DataTable<TData, TValue>({
     getPaginationRowModel: getPaginationRowModel(),
   });
 
-  // Debug: log serverPagination prop changes to help trace why page changes
   React.useEffect(() => {
     if (!serverPagination) return;
     // eslint-disable-next-line no-console
