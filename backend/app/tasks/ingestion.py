@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Optional
 
 from celery.utils.log import get_task_logger
 
@@ -12,6 +13,8 @@ from pipeline.ingestion import CSVIngestionPipeline
 from pipeline.sonar import normalize_repo_url
 from app.services import repository
 from app.tasks.sonar import run_commit_scan
+import requests
+from urllib.parse import urlparse
 
 logger = get_task_logger(__name__)
 
@@ -39,7 +42,6 @@ def ingest_data_source(self, data_source_id: str) -> dict:
 
     df["commit"] = df.get("git_trigger_commit", "").astype(str).str.strip()
     df["repo_slug"] = df.get("gh_project_name", "").astype(str).str.strip()
-    df["branch"] = df.get("git_branch", "").astype(str).str.strip()
 
     def _derive_key(slug: str) -> str:
         return slug.replace("/", "_") if slug else default_project_key
@@ -79,13 +81,53 @@ def ingest_data_source(self, data_source_id: str) -> dict:
             "repo_slug": repo_slug,
             "repository_url": repo_url,
             "commit_sha": commit,
-            "branch": row.get("branch") or None,
         }
         payload["repo_url"] = normalize_repo_url(
             payload.get("repository_url"), payload.get("repo_slug")
         )
-        run_commit_scan.delay(job["id"], data_source_id, payload)
-        queued += 1
+
+        # Verify repository exists on GitHub before queuing for scan.
+        def _extract_slug_from_url(url: str) -> Optional[str]:
+            try:
+                if url.startswith("git@"):
+                    # git@github.com:owner/repo.git
+                    parts = url.split(":", 1)
+                    if len(parts) == 2:
+                        slug = parts[1]
+                    else:
+                        return None
+                else:
+                    parsed = urlparse(url)
+                    slug = parsed.path.lstrip("/")
+                if slug.endswith(".git"):
+                    slug = slug[: -len(".git")]
+                return slug or None
+            except Exception:
+                return None
+
+        def _github_repo_exists(slug: Optional[str]) -> bool:
+            if not slug:
+                return False
+            api_url = f"https://api.github.com/repos/{slug}"
+            try:
+                resp = requests.get(api_url, timeout=10)
+                return resp.status_code == 200
+            except Exception:
+                return False
+
+        slug_to_check = payload.get("repo_slug") or _extract_slug_from_url(
+            payload.get("repository_url") or ""
+        )
+
+        if slug_to_check and _github_repo_exists(slug_to_check):
+            run_commit_scan.delay(job["id"], data_source_id, payload)
+            queued += 1
+        else:
+            logger.info(
+                "Skipping commit %s for repo %s: GitHub repository not found",
+                commit,
+                slug_to_check or payload.get("repository_url"),
+            )
 
     logger.info("Queued %d commits for job %s", queued, job["id"])
     return {"job_id": job["id"], "queued": queued}
