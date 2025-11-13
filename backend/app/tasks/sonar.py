@@ -77,13 +77,24 @@ def process_commit(
             sonar_instance=instance.name,
             sonar_host=instance.host,
         )
-        repository.update_job(
+        # Increment processed count even on failure to avoid infinite loop
+        updated_job = repository.update_job(
             job_id,
-            status="failed",
+            processed_delta=1,
+            status="running",
             last_error=message,
             current_commit=None,
         )
-        repository.update_data_source(data_source_id, status="failed")
+        # Check if job is complete (all commits processed)
+        job_finished = bool(
+            updated_job
+            and updated_job.get("processed", 0) >= updated_job.get("total", 0)
+        )
+        if job_finished:
+            # Mark job as failed since at least one commit failed
+            repository.update_job(job_id, status="failed")
+            repository.update_data_source(data_source_id, status="failed")
+
         repository.insert_dead_letter(
             payload={
                 "job_id": job_id,
@@ -97,18 +108,22 @@ def process_commit(
         raise
 
     if result.skipped:
-        repository.upsert_sonar_run(
-            data_source_id=data_source_id,
-            project_key=project_key,
-            commit_sha=commit_sha,
-            job_id=job_id,
-            status="skipped",
-            log_path=str(result.log_path),
-            message=result.output,
-            component_key=result.component_key,
-            sonar_instance=result.instance_name,
-            sonar_host=instance.host,
-        )
+        update_kwargs = {
+            "data_source_id": data_source_id,
+            "project_key": project_key,
+            "commit_sha": commit_sha,
+            "job_id": job_id,
+            "status": "skipped",
+            "log_path": str(result.log_path),
+            "message": result.output,
+            "component_key": result.component_key,
+            "sonar_instance": result.instance_name,
+            "sonar_host": instance.host,
+        }
+        if result.s3_log_key:
+            update_kwargs["s3_log_key"] = result.s3_log_key
+
+        repository.upsert_sonar_run(**update_kwargs)
         try:
             export_metrics.delay(result.component_key, job_id, data_source_id)
             logger.info(
@@ -123,17 +138,21 @@ def process_commit(
                 result.component_key,
             )
     else:
-        repository.upsert_sonar_run(
-            data_source_id=data_source_id,
-            project_key=project_key,
-            commit_sha=commit_sha,
-            job_id=job_id,
-            status="submitted",
-            log_path=str(result.log_path),
-            component_key=result.component_key,
-            sonar_instance=result.instance_name,
-            sonar_host=instance.host,
-        )
+        update_kwargs = {
+            "data_source_id": data_source_id,
+            "project_key": project_key,
+            "commit_sha": commit_sha,
+            "job_id": job_id,
+            "status": "submitted",
+            "log_path": str(result.log_path),
+            "component_key": result.component_key,
+            "sonar_instance": result.instance_name,
+            "sonar_host": instance.host,
+        }
+        if result.s3_log_key:
+            update_kwargs["s3_log_key"] = result.s3_log_key
+
+        repository.upsert_sonar_run(**update_kwargs)
 
     updated_job = repository.update_job(
         job_id,

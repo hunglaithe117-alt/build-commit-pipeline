@@ -80,6 +80,12 @@ class Repository:
     def update_dead_letter(self, *a, **k):
         return self.dead_letters.update_dead_letter(*a, **k)
 
+    def count_dead_letters_by_job(self, *a, **k):
+        return self.dead_letters.count_by_job_id(*a, **k)
+
+    def count_dead_letters_by_data_source(self, *a, **k):
+        return self.dead_letters.count_by_data_source_id(*a, **k)
+
     # Outputs
     def add_output(self, *a, **k):
         return self.outputs.add_output(*a, **k)

@@ -48,6 +48,7 @@ See [INSTANCE_POOL_QUICKSTART.md](./docs/INSTANCE_POOL_QUICKSTART.md) for detail
 
 - [Instance Pool Architecture](./docs/INSTANCE_POOL_ARCHITECTURE.md) - Detailed system design
 - [Quick Start Guide](./docs/INSTANCE_POOL_QUICKSTART.md) - Usage and operations
+- [S3 Storage Setup](./docs/S3_STORAGE_SETUP.md) - Configure S3 for log storage (recommended for production)
 
 ## API Endpoints
 
@@ -332,11 +333,78 @@ Hệ thống hiện vận hành theo mô hình một SonarQube server thu nhận
 |--------|------|-------|
 | `POST /api/data-sources?name=` | Upload CSV (multipart). Trả về metadata + stats. |
 | `POST /api/data-sources/{id}/collect` | Queue job Celery để scan + lấy metrics. |
-| `GET /api/jobs` | Danh sách job ingest. |
+| `GET /api/jobs` | Danh sách job ingest với phân trang. |
+| `GET /api/jobs/workers-stats` | **MỚI**: Thống kê workers và tasks đang chạy realtime. |
 | `GET /api/sonar/runs` | Lịch sử webhook/scan. |
 | `POST /api/sonar/webhook` | Endpoint nhận webhook SonarQube. |
 | `GET /api/outputs` | Danh sách dataset enriched. |
 | `GET /api/outputs/{id}/download` | Tải file metrics CSV. |
+
+## Worker Monitoring (Tính năng mới) 🆕
+
+Hệ thống hiện hỗ trợ theo dõi workers realtime trên trang Jobs:
+
+### Thông tin hiển thị:
+- **Số Workers**: Tổng số Celery workers đang hoạt động
+- **Concurrency (max)**: Số task tối đa có thể chạy đồng thời
+- **Đang scan**: Số commits đang được scan ngay lúc này
+- **Đang chờ**: Số commits trong queue chờ xử lý
+
+### Chi tiết từng Worker:
+Mỗi worker hiển thị:
+- Tên worker (ví dụ: `celery@sonar-worker-1`)
+- Số tasks đang chạy / tối đa
+- Thông tin từng task đang chạy:
+  - Commit SHA (8 ký tự)
+  - Repository/Project key
+
+### Cấu hình Worker Concurrency:
+
+```yaml
+# config/pipeline.yml
+pipeline:
+  sonar_parallelism: 8  # Số workers/tasks chạy đồng thời
+```
+
+**Ví dụ hiệu suất:**
+- `sonar_parallelism: 4` → 4 commits scan cùng lúc
+- `sonar_parallelism: 8` → 8 commits scan cùng lúc
+- `sonar_parallelism: 16` → 16 commits scan cùng lúc
+
+### API Endpoint Mới:
+
+**GET /api/jobs/workers-stats**
+
+Trả về thông tin realtime về workers:
+
+```json
+{
+  "total_workers": 2,
+  "max_concurrency": 8,
+  "active_scan_tasks": 5,
+  "queued_scan_tasks": 10,
+  "workers": [
+    {
+      "name": "celery@worker1",
+      "active_tasks": 3,
+      "max_concurrency": 8,
+      "tasks": [
+        {
+          "id": "task-uuid",
+          "name": "app.tasks.sonar.run_commit_scan",
+          "current_commit": "abc123def",
+          "current_repo": "owner/repo"
+        }
+      ]
+    }
+  ]
+}
+```
+
+### Tài liệu chi tiết:
+
+- [Hướng dẫn sử dụng (Tiếng Việt)](./docs/HUONG_DAN_SU_DUNG.md) - Hướng dẫn đầy đủ từ A-Z
+- [Worker Monitoring Documentation](./docs/WORKER_MONITORING.md) - Chi tiết kỹ thuật về worker monitoring
 
 ## Mở rộng
 

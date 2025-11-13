@@ -39,7 +39,6 @@ def ingest_data_source(self, data_source_id: str) -> dict:
 
     df["commit"] = df.get("git_trigger_commit", "").astype(str).str.strip()
     df["repo_slug"] = df.get("gh_project_name", "").astype(str).str.strip()
-    df["branch"] = df.get("git_branch", "").astype(str).str.strip()
 
     def _derive_key(slug: str) -> str:
         return slug.replace("/", "_") if slug else default_project_key
@@ -65,7 +64,7 @@ def ingest_data_source(self, data_source_id: str) -> dict:
     repository.update_job(job["id"], status="running")
 
     queued = 0
-    # Queue each unique row
+
     for _, row in df_unique.iterrows():
         project_key = row["project_key"]
         commit = row["commit"]
@@ -79,11 +78,11 @@ def ingest_data_source(self, data_source_id: str) -> dict:
             "repo_slug": repo_slug,
             "repository_url": repo_url,
             "commit_sha": commit,
-            "branch": row.get("branch") or None,
         }
         payload["repo_url"] = normalize_repo_url(
             payload.get("repository_url"), payload.get("repo_slug")
         )
+
         run_commit_scan.delay(job["id"], data_source_id, payload)
         queued += 1
 

@@ -33,11 +33,35 @@ export type Job = {
   status: string;
   processed: number;
   total: number;
+  failed_count?: number;
   last_error?: string | null;
   current_commit?: string | null;
   sonar_instance?: string | null;
   created_at: string;
   updated_at: string;
+};
+
+export type WorkerTask = {
+  id: string;
+  name: string;
+  current_commit?: string | null;
+  current_repo?: string | null;
+};
+
+export type WorkerInfo = {
+  name: string;
+  active_tasks: number;
+  max_concurrency: number;
+  tasks: WorkerTask[];
+};
+
+export type WorkersStats = {
+  total_workers: number;
+  max_concurrency: number;
+  active_scan_tasks: number;
+  queued_scan_tasks: number;
+  workers: WorkerInfo[];
+  error?: string;
 };
 
 export type SonarRun = {
@@ -155,6 +179,7 @@ export const api = {
     apiFetch<{ items: Job[]; total: number }>(
       buildPath("/api/jobs", { page: page ?? 1, page_size: pageSize, sort_by: sortBy, sort_dir: sortDir, filters: filters ? JSON.stringify(filters) : undefined })
     ),
+  getWorkersStats: () => apiFetch<WorkersStats>("/api/jobs/workers-stats"),
   listRuns: (limit?: number) => apiFetch<SonarRun[]>(buildPath("/api/sonar/runs", { limit })),
   listRunsPaginated: (
     page?: number,

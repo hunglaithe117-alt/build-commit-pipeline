@@ -9,7 +9,6 @@ from app.core.config import settings
 
 REPO_COLUMN = "gh_project_name"
 COMMIT_COLUMN = "git_trigger_commit"
-BRANCH_COLUMN = "git_branch"
 
 
 @dataclass
@@ -18,7 +17,6 @@ class CommitWorkItem:
     repo_slug: Optional[str]
     repository_url: Optional[str]
     commit_sha: str
-    branch: Optional[str]
 
     def to_dict(self) -> Dict[str, Optional[str]]:
         return {
@@ -26,7 +24,6 @@ class CommitWorkItem:
             "repo_slug": self.repo_slug,
             "repository_url": self.repository_url,
             "commit_sha": self.commit_sha,
-            "branch": self.branch,
         }
 
 
@@ -64,7 +61,6 @@ class CSVIngestionPipeline:
         first_commit: Optional[str] = None
         last_commit: Optional[str] = None
         repos: set[str] = set()
-        branches: set[str] = set()
         project_name: Optional[str] = None
 
         for row in self._load_rows():
@@ -79,9 +75,6 @@ class CSVIngestionPipeline:
             if slug:
                 repos.add(slug)
                 project_name = project_name or slug
-            branch = self._clean(row.get(BRANCH_COLUMN))
-            if branch:
-                branches.add(branch)
 
         unique_commit_count = len(seen_commits)
         primary_repo = project_name
@@ -90,7 +83,6 @@ class CSVIngestionPipeline:
             "project_key": self._derive_project_key(primary_repo),
             "total_builds": total_builds,
             "total_commits": unique_commit_count,
-            "unique_branches": len(branches),
             "first_commit": first_commit,
             "last_commit": last_commit,
         }
@@ -111,7 +103,6 @@ class CSVIngestionPipeline:
                 repo_slug=repo_slug,
                 repository_url=repo_url,
                 commit_sha=commit,
-                branch=self._clean(row.get(BRANCH_COLUMN)),
             )
             chunk.append(item)
             if len(chunk) >= chunk_size:

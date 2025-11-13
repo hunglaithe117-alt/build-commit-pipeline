@@ -99,6 +99,20 @@ class LoggingSettings(BaseModel):
     level: str = Field(default="INFO")
 
 
+class S3Settings(BaseModel):
+    """S3 configuration for storing logs."""
+
+    enabled: bool = Field(default=False)
+    bucket_name: str = Field(default="")
+    region: str = Field(default="us-east-1")
+    access_key_id: Optional[str] = Field(default=None)
+    secret_access_key: Optional[str] = Field(default=None)
+    endpoint_url: Optional[str] = Field(default=None)
+    sonar_logs_prefix: str = Field(default="sonar-logs")
+    dead_letter_prefix: str = Field(default="dead-letters")
+    error_logs_prefix: str = Field(default="error-logs")
+
+
 class Settings(BaseModel):
     environment: str = Field(default="local")
     paths: PathsSettings = Field(default_factory=PathsSettings)
@@ -109,6 +123,7 @@ class Settings(BaseModel):
     storage: StorageCollections = Field(default_factory=StorageCollections)
     web: WebSettings = Field(default_factory=WebSettings)
     logging: LoggingSettings = Field(default_factory=LoggingSettings)
+    s3: S3Settings = Field(default_factory=S3Settings)
 
     @property
     def sonar_token(self) -> str:
