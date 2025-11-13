@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Optional
 
 from celery.utils.log import get_task_logger
 
@@ -13,8 +12,6 @@ from pipeline.ingestion import CSVIngestionPipeline
 from pipeline.sonar import normalize_repo_url
 from app.services import repository
 from app.tasks.sonar import run_commit_scan
-import requests
-from urllib.parse import urlparse
 
 logger = get_task_logger(__name__)
 
@@ -68,36 +65,6 @@ def ingest_data_source(self, data_source_id: str) -> dict:
 
     queued = 0
 
-    def _extract_slug_from_url(url: str) -> Optional[str]:
-        try:
-            if url.startswith("git@"):
-                # git@github.com:owner/repo.git
-                parts = url.split(":", 1)
-                if len(parts) == 2:
-                    slug = parts[1]
-                else:
-                    return None
-            else:
-                parsed = urlparse(url)
-                slug = parsed.path.lstrip("/")
-            if slug.endswith(".git"):
-                slug = slug[: -len(".git")]
-            return slug or None
-        except Exception:
-            return None
-
-    def _github_repo_exists(slug: Optional[str]) -> bool:
-        if not slug:
-            return False
-        api_url = f"https://api.github.com/repos/{slug}"
-        try:
-            resp = requests.get(api_url, timeout=10)
-            return resp.status_code == 200
-        except Exception:
-            return False
-
-    slugs_to_check: set[str] = set()
-    row_payloads: list[dict] = []
     for _, row in df_unique.iterrows():
         project_key = row["project_key"]
         commit = row["commit"]
@@ -116,29 +83,8 @@ def ingest_data_source(self, data_source_id: str) -> dict:
             payload.get("repository_url"), payload.get("repo_slug")
         )
 
-        slug_to_check = payload.get("repo_slug") or _extract_slug_from_url(
-            payload.get("repository_url") or ""
-        )
-        if slug_to_check:
-            slugs_to_check.add(slug_to_check)
-
-        row_payloads.append((payload, slug_to_check, commit))
-
-    exists_map: dict[str, bool] = {}
-    for slug in slugs_to_check:
-        exists_map[slug] = _github_repo_exists(slug)
-
-    # Queue each unique row using the precomputed existence map
-    for payload, slug_to_check, commit in row_payloads:
-        if slug_to_check and exists_map.get(slug_to_check):
-            run_commit_scan.delay(job["id"], data_source_id, payload)
-            queued += 1
-        else:
-            logger.info(
-                "Skipping commit %s for repo %s: GitHub repository not found",
-                commit,
-                slug_to_check or payload.get("repository_url"),
-            )
+        run_commit_scan.delay(job["id"], data_source_id, payload)
+        queued += 1
 
     logger.info("Queued %d commits for job %s", queued, job["id"])
     return {"job_id": job["id"], "queued": queued}
