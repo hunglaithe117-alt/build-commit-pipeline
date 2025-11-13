@@ -112,9 +112,19 @@ class SonarCommitRunner:
         )
         return repo
 
-    def checkout_commit(self, commit_sha: str) -> None:
-        run_command(["git", "checkout", "-f", commit_sha], cwd=self.repo_dir)
-        run_command(["git", "clean", "-fdx"], cwd=self.repo_dir, allow_fail=True)
+    def _commit_exists(self, repo: Path, commit_sha: str) -> bool:
+        """Return True if commit object exists in the repository."""
+        completed = subprocess.run(
+            ["git", "cat-file", "-e", f"{commit_sha}^{{commit}}"],
+            cwd=str(repo),
+            capture_output=True,
+            text=True,
+        )
+        return completed.returncode == 0
+
+    # def checkout_commit(self, commit_sha: str) -> None:
+    #     run_command(["git", "checkout", "-f", commit_sha], cwd=self.repo_dir)
+    #     run_command(["git", "clean", "-fdx"], cwd=self.repo_dir, allow_fail=True)
 
     def create_worktree(self, commit_sha: str) -> Path:
         target = self.worktrees_dir / commit_sha
@@ -257,6 +267,28 @@ class SonarCommitRunner:
         try:
             with self.repo_mutex():
                 self.refresh_repo(repo_url)
+                # If the commit object is missing after a normal fetch, it may live
+                # on a different remote (e.g. a fork). Try to fetch from a fallback
+                # remote derived from repo_slug if provided.
+                repo = self.repo_dir
+                if not self._commit_exists(repo, commit_sha) and repo_slug:
+                    try:
+                        fallback_url = normalize_repo_url(None, repo_slug)
+                    except Exception:
+                        fallback_url = None
+
+                    if fallback_url and fallback_url != repo_url:
+                        LOG.info(
+                            "Commit %s not found in origin; attempting fetch from fork remote %s",
+                            commit_sha,
+                            fallback_url,
+                        )
+                        # ensure any previous 'fork' remote is removed
+                        run_command(["git", "remote", "remove", "fork"], cwd=repo, allow_fail=True)
+                        run_command(["git", "remote", "add", "fork", fallback_url], cwd=repo, allow_fail=True)
+                        run_command(["git", "fetch", "fork", "--tags", "--prune"], cwd=repo, allow_fail=True)
+
+                # Now attempt to create the worktree (will raise if commit still missing)
                 worktree = self.create_worktree(commit_sha)
 
             project_type = self.detect_project_type(worktree)
