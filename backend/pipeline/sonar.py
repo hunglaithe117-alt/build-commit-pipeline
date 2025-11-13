@@ -161,16 +161,9 @@ class SonarCommitRunner:
             f"-Dsonar.host.url={self.host}",
             f"-Dsonar.token={self.token}",
             "-Dsonar.sourceEncoding=UTF-8",
-            "-Dsonar.exclusions=**/test/**,**/tests/**,**/spec/**,**/features/**,**/tmp/**,**/vendor/**,**/node_modules/**",
+            "-Dsonar.scm.exclusions.disabled=true",
+            "-Dsonar.java.binaries=.",
         ]
-
-        if project_type == "ruby":
-            scanner_args.extend(
-                [
-                    "-Dsonar.language=ruby",
-                    "-Dsonar.java.binaries=target/classes",
-                ]
-            )
 
         if config_path:
             scanner_args.append(f"-Dproject.settings=/usr/src/{config_path.name}")
