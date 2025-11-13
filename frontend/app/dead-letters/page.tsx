@@ -48,7 +48,7 @@ export default function DeadLettersPage() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [pageIndex]);
 
   const handleServerChange = async (params: {
     pageIndex: number;
@@ -63,6 +63,7 @@ export default function DeadLettersPage() {
       const res = await api.listDeadLettersPaginated(params.pageIndex + 1, params.pageSize, sortBy, sortDir, params.filters);
       setItems(res.items);
       setTotal(res.total || 0);
+      setPageIndex(params.pageIndex);
       const cur = selectedRef.current;
       if (cur) {
         const next = res.items.find((item: DeadLetter) => item.id === cur.id);
@@ -71,7 +72,6 @@ export default function DeadLettersPage() {
           selectedRef.current = next;
         }
       }
-      setPageIndex(params.pageIndex);
     } catch (error: any) {
       setMessage(error.message);
     } finally {
@@ -79,6 +79,7 @@ export default function DeadLettersPage() {
     }
   };
 
+  // Initial load
   useEffect(() => {
     refresh().catch(() => setLoading(false));
   }, [refresh]);

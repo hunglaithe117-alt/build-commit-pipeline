@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import csv
 import logging
 import os
 from hashlib import sha256
@@ -338,13 +339,14 @@ class MetricsExporter:
         if not measures:
             raise RuntimeError(f"No measures returned for {project_key}")
         headers = ["project_key", *self.metrics]
-        with destination.open("w", encoding="utf-8") as handle:
-            handle.write(",".join(headers) + "\n")
+        with destination.open("w", encoding="utf-8", newline="") as handle:
+            writer = csv.writer(handle, quoting=csv.QUOTE_MINIMAL)
+            writer.writerow(headers)
             row = [
                 project_key,
                 *[str(measures.get(metric, "")) for metric in self.metrics],
             ]
-            handle.write(",".join(row) + "\n")
+            writer.writerow(row)
         return measures
 
     def append_commit_metrics(
@@ -364,17 +366,25 @@ class MetricsExporter:
         ]
 
         record_count = 0
-        with destination.open("a+", encoding="utf-8") as handle:
+        with destination.open("a+", encoding="utf-8", newline="") as handle:
             fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
             try:
                 handle.seek(0, os.SEEK_END)
                 file_was_empty = handle.tell() == 0
-                if file_was_empty:
-                    handle.write(",".join(headers) + "\n")
-                handle.write(",".join(row) + "\n")
-                handle.flush()
+                
                 handle.seek(0)
-                record_count = max(sum(1 for _ in handle) - 1, 0)
+                if file_was_empty:
+                    writer = csv.writer(handle, quoting=csv.QUOTE_MINIMAL)
+                    writer.writerow(headers)
+                    record_count = 0
+                else:
+                    record_count = max(sum(1 for _ in handle) - 1, 0)
+                
+                handle.seek(0, os.SEEK_END)
+                writer = csv.writer(handle, quoting=csv.QUOTE_MINIMAL)
+                writer.writerow(row)
+                handle.flush()
+                record_count += 1
             finally:
                 fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 

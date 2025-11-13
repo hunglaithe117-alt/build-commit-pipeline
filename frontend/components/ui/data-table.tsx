@@ -66,9 +66,21 @@ export function DataTable<TData, TValue>({
     pageSize,
   });
 
+  // Sync serverPagination into internal pagination state
   React.useEffect(() => {
-    setPagination((prev) => ({ ...prev, pageSize, pageIndex: 0 }));
-  }, [pageSize, data]);
+    if (serverPagination) {
+      setPagination({
+        pageIndex: serverPagination.pageIndex,
+        pageSize: serverPagination.pageSize,
+      });
+    }
+  }, [serverPagination?.pageIndex, serverPagination?.pageSize]);
+
+  React.useEffect(() => {
+    if (!serverPagination) {
+      setPagination((prev) => ({ ...prev, pageSize, pageIndex: 0 }));
+    }
+  }, [pageSize, data, serverPagination]);
 
   const table = useReactTable({
     data,

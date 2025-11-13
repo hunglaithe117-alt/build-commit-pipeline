@@ -36,14 +36,10 @@ export default function DataSourcesPage() {
     setTotal(res.total || 0);
   }, [pageIndex]);
 
+  // Initial load
   useEffect(() => {
     refresh().catch((err) => setMessage(err.message));
   }, [refresh]);
-
-  useEffect(() => {
-    // refresh when page index changes
-    refresh().catch((err) => setMessage(err.message));
-  }, [pageIndex, refresh]);
 
   const totals = useMemo(() => {
     if (!dataSources.length) {

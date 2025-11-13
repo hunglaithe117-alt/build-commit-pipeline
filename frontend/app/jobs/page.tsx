@@ -41,6 +41,7 @@ export default function JobsPage() {
     }
   };
 
+  // Initial load only
   useEffect(() => {
     handleServerChange({
       pageIndex: 0,
@@ -48,7 +49,10 @@ export default function JobsPage() {
       sorting: null,
       filters: {},
     }).catch((err) => setError(err.message));
+  }, []);
 
+  // Auto-refresh current page every 5 seconds
+  useEffect(() => {
     const interval = setInterval(() => {
       handleServerChange({
         pageIndex,

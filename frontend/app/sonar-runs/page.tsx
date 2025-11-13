@@ -34,6 +34,16 @@ export default function SonarRunsPage() {
     }
   };
 
+  // Initial load
+  useEffect(() => {
+    handleServerChange({
+      pageIndex: 0,
+      pageSize: 50,
+      sorting: null,
+      filters: {},
+    }).catch((err) => setError(err.message));
+  }, []);
+
   const statusOptions = useMemo(() => Array.from(new Set(runs.map((item) => item.status))).sort(), [runs]);
 
   const columns = useMemo<ColumnDef<SonarRun>[]>(() => {

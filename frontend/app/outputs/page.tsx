@@ -37,6 +37,16 @@ export default function OutputsPage() {
     }
   };
 
+  // Initial load
+  useEffect(() => {
+    handleServerChange({
+      pageIndex: 0,
+      pageSize: 20,
+      sorting: null,
+      filters: {},
+    }).catch((err) => setError(err.message));
+  }, []);
+
   const statusOptions = useMemo(() => ["ready"], []);
 
   const columns = useMemo<ColumnDef<OutputDataset>[]>(() => {
