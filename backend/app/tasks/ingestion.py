@@ -67,7 +67,37 @@ def ingest_data_source(self, data_source_id: str) -> dict:
     repository.update_job(job["id"], status="running")
 
     queued = 0
-    # Queue each unique row
+
+    def _extract_slug_from_url(url: str) -> Optional[str]:
+        try:
+            if url.startswith("git@"):
+                # git@github.com:owner/repo.git
+                parts = url.split(":", 1)
+                if len(parts) == 2:
+                    slug = parts[1]
+                else:
+                    return None
+            else:
+                parsed = urlparse(url)
+                slug = parsed.path.lstrip("/")
+            if slug.endswith(".git"):
+                slug = slug[: -len(".git")]
+            return slug or None
+        except Exception:
+            return None
+
+    def _github_repo_exists(slug: Optional[str]) -> bool:
+        if not slug:
+            return False
+        api_url = f"https://api.github.com/repos/{slug}"
+        try:
+            resp = requests.get(api_url, timeout=10)
+            return resp.status_code == 200
+        except Exception:
+            return False
+
+    slugs_to_check: set[str] = set()
+    row_payloads: list[dict] = []
     for _, row in df_unique.iterrows():
         project_key = row["project_key"]
         commit = row["commit"]
@@ -86,40 +116,21 @@ def ingest_data_source(self, data_source_id: str) -> dict:
             payload.get("repository_url"), payload.get("repo_slug")
         )
 
-        # Verify repository exists on GitHub before queuing for scan.
-        def _extract_slug_from_url(url: str) -> Optional[str]:
-            try:
-                if url.startswith("git@"):
-                    # git@github.com:owner/repo.git
-                    parts = url.split(":", 1)
-                    if len(parts) == 2:
-                        slug = parts[1]
-                    else:
-                        return None
-                else:
-                    parsed = urlparse(url)
-                    slug = parsed.path.lstrip("/")
-                if slug.endswith(".git"):
-                    slug = slug[: -len(".git")]
-                return slug or None
-            except Exception:
-                return None
-
-        def _github_repo_exists(slug: Optional[str]) -> bool:
-            if not slug:
-                return False
-            api_url = f"https://api.github.com/repos/{slug}"
-            try:
-                resp = requests.get(api_url, timeout=10)
-                return resp.status_code == 200
-            except Exception:
-                return False
-
         slug_to_check = payload.get("repo_slug") or _extract_slug_from_url(
             payload.get("repository_url") or ""
         )
+        if slug_to_check:
+            slugs_to_check.add(slug_to_check)
 
-        if slug_to_check and _github_repo_exists(slug_to_check):
+        row_payloads.append((payload, slug_to_check, commit))
+
+    exists_map: dict[str, bool] = {}
+    for slug in slugs_to_check:
+        exists_map[slug] = _github_repo_exists(slug)
+
+    # Queue each unique row using the precomputed existence map
+    for payload, slug_to_check, commit in row_payloads:
+        if slug_to_check and exists_map.get(slug_to_check):
             run_commit_scan.delay(job["id"], data_source_id, payload)
             queued += 1
         else:
