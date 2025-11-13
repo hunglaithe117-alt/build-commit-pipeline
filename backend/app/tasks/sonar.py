@@ -109,6 +109,19 @@ def process_commit(
             sonar_instance=result.instance_name,
             sonar_host=instance.host,
         )
+        try:
+            export_metrics.delay(result.component_key, job_id, data_source_id)
+            logger.info(
+                "Queued export_metrics for existing component %s (job=%s, data_source=%s)",
+                result.component_key,
+                job_id,
+                data_source_id,
+            )
+        except Exception:
+            logger.exception(
+                "Failed to enqueue export_metrics for component %s",
+                result.component_key,
+            )
     else:
         repository.upsert_sonar_run(
             data_source_id=data_source_id,
@@ -208,7 +221,9 @@ def export_metrics(
     analysis_id: Optional[str] = None,
 ) -> str:
     run_doc = repository.find_sonar_run_by_component(component_key)
-    logger.info("Exporting metrics for component_key=%s, run_doc=%s", component_key, run_doc)
+    logger.info(
+        "Exporting metrics for component_key=%s, run_doc=%s", component_key, run_doc
+    )
     if run_doc:
         instance = settings.sonarqube.get_instance(run_doc.get("sonar_instance"))
         target_job_id = job_id or run_doc.get("job_id") or "ad-hoc"
