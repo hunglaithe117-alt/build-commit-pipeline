@@ -1,4 +1,160 @@
-# build-commit-pipeline
+# Build Commit Pipeline
+
+Pipeline orchestrator for TravisTorrent data ingestion and SonarQube enrichment with **distributed instance pooling**.
+
+## Features
+
+- **Multi-Instance SonarQube Pool**: Process commits across multiple SonarQube instances in parallel
+- **Redis Distributed Locks**: Ensure per-instance concurrency = 1 while allowing global concurrency > 1
+- **High Throughput**: Process multiple commits simultaneously with automatic load balancing
+- **Fault Tolerant**: Auto-retry with exponential backoff, auto-expiring locks prevent deadlocks
+- **Observable**: Real-time instance status monitoring via REST API
+
+## Architecture
+
+```
+Celery Workers (concurrency=4) 
+    ↓
+Redis Lock Manager (round-robin)
+    ↓
+SonarQube Instances (2+)
+    - primary: localhost:9001
+    - secondary: sonarqube2:9002
+```
+
+**Key Principle**: Global concurrency > 1, but each SonarQube instance handles max 1 job at a time (SonarQube CE limitation).
+
+## Quick Start
+
+```bash
+# Start all services
+docker-compose up -d
+
+# Monitor workers
+Use the API or container logs to observe parallel sonar-scanner workers. For example:
+
+```bash
+# View worker logs
+docker-compose logs -f worker
+```
+
+# View worker logs
+docker-compose logs -f worker
+```
+
+See [INSTANCE_POOL_QUICKSTART.md](./docs/INSTANCE_POOL_QUICKSTART.md) for detailed usage.
+
+## Documentation
+
+- [Instance Pool Architecture](./docs/INSTANCE_POOL_ARCHITECTURE.md) - Detailed system design
+- [Quick Start Guide](./docs/INSTANCE_POOL_QUICKSTART.md) - Usage and operations
+
+## API Endpoints
+
+### Sonar / Jobs API
+The primary API for pipeline control is focused on queuing jobs and viewing scan/export results. Use the `jobs`, `sonar` and `outputs` endpoints to submit work and inspect results.
+
+### Data Sources & Jobs
+- `GET /api/data-sources` - List data sources
+- `POST /api/jobs` - Create analysis job
+- `GET /api/jobs` - List jobs
+- `GET /api/outputs` - List output files
+
+## Performance
+
+| Commits | Concurrency | Time (avg 2min/commit) |
+|---------|-------------|------------------------|
+| 100     | 1           | ~200 minutes (~3.3h)   |
+| 100     | 4           | ~50 minutes            |
+| 100     | 8           | ~25 minutes            |
+| 100     | 16          | ~13 minutes            |
+
+**Speedup: Up to 16x faster with parallel scanners!** 🚀
+
+## Resource Requirements
+
+| Concurrency | RAM   | CPU  | Disk    |
+|-------------|-------|------|---------|
+| 4           | 4GB   | 4    | 50GB    |
+| 8           | 8GB   | 8    | 100GB   |
+| 16          | 16GB  | 16   | 200GB   |
+
+## Configuration Options
+
+### Increase Concurrency
+
+```yaml
+# config/pipeline.yml
+pipeline:
+  sonar_parallelism: 16  # More parallel scanners
+```
+
+### Tune SonarQube Performance
+
+```yaml
+# docker-compose.yml
+sonarqube:
+  environment:
+    SONAR_CE_JAVAOPTS: "-Xmx8g -Xms4g"  # More memory
+    SONAR_WEB_JAVAADDITIONALOPTS: "-Dsonar.web.http.maxThreads=300"  # More threads
+```
+
+## Technology Stack
+
+- **FastAPI** - REST API framework
+- **Celery** - Distributed task queue  
+- **RabbitMQ** - Message broker
+- **MongoDB** - Job/metadata storage
+- **SonarQube** - Code quality analysis server
+- **PostgreSQL** - SonarQube metrics database
+- **Docker** - Containerization
+
+## Monitoring
+
+```bash
+# Watch parallel scanners in action
+docker-compose logs -f worker | grep "Processing commit"
+
+# Monitor resource usage
+docker stats worker sonarqube
+
+# Check queue depth
+curl -u pipeline:pipeline http://localhost:15672/api/queues
+```
+
+## Troubleshooting
+
+### Workers idle, no scanning
+
+```bash
+# Check RabbitMQ connection
+docker-compose logs worker | grep -i connected
+
+# Restart worker
+docker-compose restart worker
+```
+
+### SonarQube out of memory
+
+```bash
+# Check memory usage
+docker stats sonarqube
+
+# Increase heap size in docker-compose.yml
+SONAR_CE_JAVAOPTS: "-Xmx8g -Xms4g"
+```
+
+### Disk space full
+
+```bash
+# Clean old worktrees
+docker-compose exec worker find /app/data/sonar-work -name worktrees -exec rm -rf {} +
+```
+
+## License
+
+MIT
+
 
 Pipeline thu thập & làm giàu TravisTorrent với FastAPI + Celery + RabbitMQ + MongoDB, tích hợp SonarQube webhook và giao diện Next.js để quản lý toàn bộ quy trình.
 
@@ -73,7 +229,6 @@ npm run dev
 3. **Điền config**:
    - Sao chép `config/pipeline.example.yml` thành `config/pipeline.yml` (đã thực hiện với cấu hình mặc định). Cập nhật:
      - `sonarqube.instances`: danh sách SonarQube bạn muốn dùng (mỗi entry cần `host` và `token`). Worker sẽ round-robin commit qua các instance này.
-     - `sonarqube.max_concurrent_jobs_per_instance`: số commit song song tối đa trên mỗi instance (Community Edition = 1).
      - `sonarqube.webhook_secret`: chuỗi bí mật để SonarQube gửi webhook.
 4. **Logging (tùy chọn)**: Nếu sử dụng Loki + Promtail + Grafana trong `docker-compose.yml`, giữ nguyên `config/promtail-config.yml` hoặc chỉnh lại đường log mong muốn.
 
@@ -125,7 +280,6 @@ Trong `config/pipeline.yml`, bạn có thể khai báo nhiều instance:
 
 ```yaml
 sonarqube:
-  max_concurrent_jobs_per_instance: 1
   instances:
     - name: primary
       host: http://sonarqube1:9000
@@ -137,8 +291,7 @@ sonarqube:
 
 Mỗi commit từ CSV sẽ được gán lần lượt cho từng instance. Thông tin `sonar_instance`, `sonar_host`, commit hiện tại và log file đều được hiển thị trên giao diện `/jobs` và `/sonar-runs` để dễ theo dõi realtime.
 
-- Hệ thống sử dụng `instance_locks` trong Mongo để đảm bảo **mỗi SonarQube chỉ xử lý nhiều nhất `max_concurrent_jobs_per_instance` commit cùng lúc**. Nếu tất cả instance đều bận, Celery sẽ retry cho tới khi có slot trống.
-- Round-robin + lock đảm bảo các commit được dàn đều trên các server hiện có mà không cần phải tách file CSV theo instance.
+Hệ thống hiện vận hành theo mô hình một SonarQube server thu nhận các phân tích, và nhiều sonar-scanner worker chạy song song để submit analyses. SonarQube (CE) xử lý một phân tích tại một thời điểm; khi sử dụng một server duy nhất, việc phân phối work được thực hiện bởi hàng đợi Celery và nhiều worker chạy đồng thời.
 - Docker Compose đã cấu hình sẵn hai database Postgres (`sonar_primary`, `sonar_secondary`) thông qua `config/postgres-init.sql`, vì vậy mỗi SonarQube container sử dụng schema riêng biệt và không tranh chấp migration. Nếu bạn đã chạy phiên bản cũ (một database), hãy xóa volume `postgres_data` trước khi khởi động lại để script có cơ hội tạo schema mới.
 
 ## Observability (Grafana + Loki)

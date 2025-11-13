@@ -13,10 +13,6 @@ from app.services import repository
 logger = get_task_logger(__name__)
 
 
-class NoAvailableSonarInstance(RuntimeError):
-    """Raised when every SonarQube instance is currently busy."""
-
-
 def process_commit(
     job_id: str,
     data_source_id: str,
@@ -128,80 +124,63 @@ def process_commit(
     return result.component_key, job_finished
 
 
-def _max_instance_parallelism() -> int:
-    configured = settings.sonarqube.max_concurrent_jobs_per_instance
-    if configured and configured > 0:
-        return configured
-    return 1
-
-
-def _acquire_instance_slot(job_id: str, data_source_id: str):
-    instances = settings.sonarqube.get_instances()
-    if not instances:
-        raise ValueError("No SonarQube instances configured.")
-
-    total_instances = len(instances)
-    max_parallel = _max_instance_parallelism()
-
-    for _ in range(total_instances):
-        index = repository.next_round_robin_index(total_instances)
-        instance = instances[index]
-        if repository.acquire_instance_lock(
-            instance.name,
-            job_id,
-            data_source_id,
-            max_concurrent=max_parallel,
-        ):
-            return instance
-
-    raise NoAvailableSonarInstance("All SonarQube instances are busy")
-
-
-@celery_app.task(bind=True, autoretry_for=(Exception,), retry_backoff=True, retry_kwargs={"max_retries": 3})
-def run_commit_scan(self, job_id: str, data_source_id: str, commit: Dict[str, str]) -> str:
+@celery_app.task(
+    bind=True,
+    autoretry_for=(Exception,),
+    retry_backoff=True,
+    retry_kwargs={"max_retries": 3},
+)
+def run_commit_scan(
+    self, job_id: str, data_source_id: str, commit: Dict[str, str]
+) -> str:
+    """Run SonarQube scan for a single commit."""
     project_key = commit.get("project_key")
+    commit_sha = commit.get("commit_sha")
+
     if not project_key:
         raise ValueError("Commit payload missing project_key")
 
-    try:
-        instance = _acquire_instance_slot(job_id, data_source_id)
-    except NoAvailableSonarInstance as exc:
-        commit_sha = commit.get("commit_sha")
-        logger.info(
-            "All SonarQube instances busy for job %s commit %s; retrying in 30s",
-            job_id,
-            commit_sha,
-        )
-        raise self.retry(exc=exc, countdown=30, max_retries=1000000)
-
+    instance = settings.sonarqube.get_instance()
     runner = get_runner_for_instance(project_key, instance.name)
     repository.update_job(job_id, sonar_instance=instance.name)
+
     data_source = repository.get_data_source(data_source_id)
     default_config_path = None
     if data_source:
         default_config_path = (data_source.get("sonar_config") or {}).get("file_path")
+
     override_text = commit.get("config_override")
     if override_text:
         config_path = runner.ensure_override_config(override_text)
     else:
         config_path = default_config_path
 
-    component_key = None
-    try:
-        component_key, job_finished = process_commit(
-            job_id,
-            data_source_id,
-            commit,
-            runner,
-            config_path=config_path,
-        )
-    finally:
-        repository.release_instance_lock(instance.name, job_id)
+    logger.info(
+        f"Processing commit '{commit_sha}' on instance '{instance.name}' (job '{job_id}')"
+    )
+
+    component_key, job_finished = process_commit(
+        job_id,
+        data_source_id,
+        commit,
+        runner,
+        config_path=config_path,
+    )
+
+    logger.info(
+        f"Successfully processed commit '{commit_sha}' on instance '{instance.name}' "
+        f"(component: {component_key}, job_finished: {job_finished})"
+    )
 
     return component_key
 
 
-@celery_app.task(bind=True, autoretry_for=(Exception,), retry_backoff=True, retry_kwargs={"max_retries": 3})
+@celery_app.task(
+    bind=True,
+    autoretry_for=(Exception,),
+    retry_backoff=True,
+    retry_kwargs={"max_retries": 3},
+)
 def export_metrics(
     self,
     component_key: str,
@@ -244,7 +223,9 @@ def export_metrics(
 
     # Create or update output record
     if target_job_id:
-        existing_output = repository.find_output_by_job_and_path(target_job_id, str(destination))
+        existing_output = repository.find_output_by_job_and_path(
+            target_job_id, str(destination)
+        )
         if existing_output:
             # Update existing output with new record count
             update_kwargs = {
@@ -286,5 +267,10 @@ def export_metrics(
             sonar_host=instance.host,
         )
 
-    logger.info("Metrics for %s appended to %s (total records: %d)", component_key, destination, record_count)
+    logger.info(
+        "Metrics for %s appended to %s (total records: %d)",
+        component_key,
+        destination,
+        record_count,
+    )
     return str(destination)

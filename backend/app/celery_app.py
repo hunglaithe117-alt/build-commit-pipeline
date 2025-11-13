@@ -17,13 +17,19 @@ celery_app = Celery(
 celery_app.conf.update(
     task_default_queue=settings.broker.default_queue,
     task_acks_late=True,
-    worker_prefetch_multiplier=1,
+    worker_prefetch_multiplier=2,
+    worker_concurrency=settings.pipeline.sonar_parallelism,
     broker_connection_retry_on_startup=True,
     task_default_retry_delay=10,
+    task_retry_backoff=True,
+    task_retry_backoff_max=180,  # Max 3 minutes
+    task_retry_jitter=True,  # Add randomness to avoid thundering herd
     task_routes={
         "app.tasks.sonar.export_metrics": {"queue": settings.broker.default_queue},
-        "app.tasks.sonar.run_project_scan": {"queue": settings.broker.default_queue},
-        "app.tasks.ingestion.ingest_data_source": {"queue": settings.broker.default_queue},
+        "app.tasks.sonar.run_commit_scan": {"queue": settings.broker.default_queue},
+        "app.tasks.ingestion.ingest_data_source": {
+            "queue": settings.broker.default_queue
+        },
     },
 )
 

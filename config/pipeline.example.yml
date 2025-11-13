@@ -19,7 +19,6 @@ pipeline:
 sonarqube:
   webhook_secret: change-me
   webhook_public_url: http://localhost:8000/api/sonar/webhook
-  max_concurrent_jobs_per_instance: 1
   instances:
     - name: primary
       host: http://localhost:9001
@@ -107,6 +106,5 @@ storage:
   sonar_runs_collection: sonar_runs
   dead_letter_collection: dead_letters
   outputs_collection: outputs
-  instance_locks_collection: instance_locks
 web:
   base_url: http://localhost:3000
