@@ -8,3 +8,4 @@ pymongo==4.6.1
 celery==5.3.6
 requests==2.31.0
 tenacity==8.2.3
+pandas==2.2.3
