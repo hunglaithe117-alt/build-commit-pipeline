@@ -1,4 +1,6 @@
 environment: local
+logging:
+  level: INFO
 paths:
   uploads: /app/data/uploads
   exports: /app/data/exports
@@ -22,9 +24,6 @@ sonarqube:
   instances:
     - name: primary
       host: http://localhost:9001
-      token: "paste-token-here"
-    - name: secondary
-      host: http://sonarqube2:9002
       token: "paste-token-here"
   measures:
     keys:

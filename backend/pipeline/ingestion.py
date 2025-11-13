@@ -3,7 +3,7 @@ from __future__ import annotations
 import csv
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, Iterable, Iterator, List, Optional
+from typing import Dict, Iterable, Iterator, List, Optional, Set
 
 from app.core.config import settings
 
@@ -60,7 +60,9 @@ class CSVIngestionPipeline:
 
     def summarise(self) -> Dict[str, Optional[str] | int]:
         total_builds = 0
-        commits: List[str] = []
+        seen_commits: Set[str] = set()
+        first_commit: Optional[str] = None
+        last_commit: Optional[str] = None
         repos: set[str] = set()
         branches: set[str] = set()
         project_name: Optional[str] = None
@@ -68,8 +70,11 @@ class CSVIngestionPipeline:
         for row in self._load_rows():
             total_builds += 1
             commit = self._clean(row.get(COMMIT_COLUMN))
-            if commit:
-                commits.append(commit)
+            if commit and commit not in seen_commits:
+                seen_commits.add(commit)
+                if first_commit is None:
+                    first_commit = commit
+                last_commit = commit
             slug = self._clean(row.get(REPO_COLUMN))
             if slug:
                 repos.add(slug)
@@ -77,21 +82,17 @@ class CSVIngestionPipeline:
             branch = self._clean(row.get(BRANCH_COLUMN))
             if branch:
                 branches.add(branch)
-            repo_slug = slug
-            repo_url = None
-            if not repo_url and repo_slug:
-                repo_url = f"https://github.com/{repo_slug}.git"
 
-        unique_commits = list(dict.fromkeys(commits))
+        unique_commit_count = len(seen_commits)
         primary_repo = project_name
         return {
             "project_name": project_name,
             "project_key": self._derive_project_key(primary_repo),
             "total_builds": total_builds,
-            "total_commits": len(unique_commits),
+            "total_commits": unique_commit_count,
             "unique_branches": len(branches),
-            "first_commit": unique_commits[0] if unique_commits else None,
-            "last_commit": unique_commits[-1] if unique_commits else None,
+            "first_commit": first_commit,
+            "last_commit": last_commit,
         }
 
     def iter_commit_chunks(self, chunk_size: int) -> Iterable[List[CommitWorkItem]]:

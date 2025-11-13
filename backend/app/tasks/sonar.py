@@ -13,6 +13,25 @@ from app.services import repository
 logger = get_task_logger(__name__)
 
 
+def _sanitize_segment(value: Optional[str], fallback: str) -> str:
+    candidate = (value or "").strip() or fallback
+    return "".join(ch if ch.isalnum() or ch in {"-", "_"} else "_" for ch in candidate)
+
+
+def _build_metrics_destination(
+    project_key: Optional[str], job_id: Optional[str], data_source_id: Optional[str]
+) -> Path:
+    project_part = _sanitize_segment(project_key, "project")
+    job_part = _sanitize_segment(job_id, "ad-hoc")
+    data_source_part = _sanitize_segment(data_source_id, "unknown")
+    return (
+        Path(settings.paths.exports)
+        / project_part
+        / data_source_part
+        / f"{job_part}_metrics.csv"
+    )
+
+
 def process_commit(
     job_id: str,
     data_source_id: str,
@@ -206,7 +225,7 @@ def export_metrics(
 
     exporter = MetricsExporter.from_instance(instance)
 
-    destination = Path(settings.paths.exports) / f"{project_key}_metrics.csv"
+    destination = _build_metrics_destination(project_key, target_job_id, target_ds)
 
     measures, record_count = exporter.append_commit_metrics(
         component_key, destination, commit_sha

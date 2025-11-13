@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from hashlib import sha256
 import shutil
 import subprocess
@@ -362,23 +363,27 @@ class MetricsExporter:
             LOG.warning(f"No measures returned for {component_key}")
             return {}, 0
 
-        file_exists = destination.exists() and destination.stat().st_size > 0
         headers = ["component_key", "commit_sha", *self.metrics]
-
-        with destination.open("a", encoding="utf-8") as handle:
-            if not file_exists:
-                handle.write(",".join(headers) + "\n")
-            row = [
-                component_key,
-                commit_sha or "",
-                *[str(measures.get(metric, "")) for metric in self.metrics],
-            ]
-            handle.write(",".join(row) + "\n")
+        row = [
+            component_key,
+            commit_sha or "",
+            *[str(measures.get(metric, "")) for metric in self.metrics],
+        ]
 
         record_count = 0
-        if destination.exists():
-            with destination.open("r", encoding="utf-8") as handle:
+        with destination.open("a+", encoding="utf-8") as handle:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+            try:
+                handle.seek(0, os.SEEK_END)
+                file_was_empty = handle.tell() == 0
+                if file_was_empty:
+                    handle.write(",".join(headers) + "\n")
+                handle.write(",".join(row) + "\n")
+                handle.flush()
+                handle.seek(0)
                 record_count = max(sum(1 for _ in handle) - 1, 0)
+            finally:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
         LOG.info(
             "Appended metrics for %s to %s (total rows: %d)",
