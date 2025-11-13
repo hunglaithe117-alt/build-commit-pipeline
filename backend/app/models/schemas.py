@@ -59,6 +59,7 @@ class Job(BaseModel):
     status: JobStatus
     processed: int = 0
     total: int = 0
+    failed_count: int = 0
     last_error: Optional[str] = None
     current_commit: Optional[str] = None
     sonar_instance: Optional[str] = None

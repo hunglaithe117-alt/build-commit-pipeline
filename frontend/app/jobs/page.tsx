@@ -106,6 +106,7 @@ export default function JobsPage() {
           const progress = row.original.total
             ? Math.round((row.original.processed / row.original.total) * 100)
             : 0;
+          const failedCount = row.original.failed_count || 0;
           return (
             <div className="space-y-1">
               <div className="flex items-center gap-3">
@@ -114,8 +115,13 @@ export default function JobsPage() {
                   {progress}%
                 </span>
               </div>
-              <div className="text-xs text-slate-500">
-                {row.original.processed} / {row.original.total} commits
+              <div className="text-xs text-slate-500 flex items-center gap-2">
+                <span>{row.original.processed} / {row.original.total} commits</span>
+                {failedCount > 0 && (
+                  <span className="text-red-600 font-medium">
+                    • {failedCount} lỗi
+                  </span>
+                )}
               </div>
             </div>
           );

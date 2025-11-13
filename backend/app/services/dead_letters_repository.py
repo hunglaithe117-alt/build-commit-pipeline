@@ -96,3 +96,15 @@ class DeadLettersRepository(MongoRepositoryBase):
             return_document=ReturnDocument.AFTER,
         )
         return self._serialize(doc) if doc else None
+
+    def count_by_job_id(self, job_id: str) -> int:
+        """Count dead letters for a specific job."""
+        return self.db[self.collections.dead_letter_collection].count_documents(
+            {"payload.job_id": job_id}
+        )
+
+    def count_by_data_source_id(self, data_source_id: str) -> int:
+        """Count dead letters for a specific data source."""
+        return self.db[self.collections.dead_letter_collection].count_documents(
+            {"payload.data_source_id": data_source_id}
+        )

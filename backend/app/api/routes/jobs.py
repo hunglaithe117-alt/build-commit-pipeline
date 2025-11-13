@@ -32,7 +32,20 @@ async def list_jobs(
         sort_dir,
         parsed_filters,
     )
-    return {"items": [Job(**job) for job in result["items"]], "total": result["total"]}
+    
+    # Add failed_count for each job
+    items_with_failed = []
+    for job in result["items"]:
+        job_dict = dict(job)
+        # Count dead letters for this job
+        failed_count = await run_in_threadpool(
+            repository.count_dead_letters_by_job,
+            job_dict["id"]
+        )
+        job_dict["failed_count"] = failed_count
+        items_with_failed.append(Job(**job_dict))
+    
+    return {"items": items_with_failed, "total": result["total"]}
 
 
 @router.get("/workers-stats")

@@ -33,6 +33,7 @@ export type Job = {
   status: string;
   processed: number;
   total: number;
+  failed_count?: number;
   last_error?: string | null;
   current_commit?: string | null;
   sonar_instance?: string | null;
