@@ -34,7 +34,7 @@ celery_app.conf.update(
 
 celery_app.conf.task_queues = (
     Queue("pipeline.ingest"),
-    Queue("pipeline.scan"),
+    Queue("pipeline.scan", queue_arguments={"x-max-priority": 10}),
     Queue("pipeline.exports"),
 )
 

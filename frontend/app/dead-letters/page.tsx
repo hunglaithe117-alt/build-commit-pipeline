@@ -27,7 +27,18 @@ export default function DeadLettersPage() {
   const refresh = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await api.listDeadLettersPaginated(pageIndex + 1, 20);
+      const searchParams = new URLSearchParams(window.location.search);
+      const projectParam = searchParams.get("project");
+      const filters: Record<string, any> | undefined = projectParam
+        ? { "payload.commit.project_key": projectParam }
+        : undefined;
+      const res = await api.listDeadLettersPaginated(
+        pageIndex + 1,
+        20,
+        undefined,
+        undefined,
+        filters
+      );
       setItems(res.items);
       setTotal(res.total || 0);
       const data = res.items;
@@ -60,7 +71,19 @@ export default function DeadLettersPage() {
     try {
       const sortBy = params.sorting?.id;
       const sortDir = params.sorting?.desc ? "desc" : "asc";
-      const res = await api.listDeadLettersPaginated(params.pageIndex + 1, params.pageSize, sortBy, sortDir, params.filters);
+      const searchParams = new URLSearchParams(window.location.search);
+      const projectParam = searchParams.get("project");
+      const mergedFilters = { ...(params.filters || {}) };
+      if (projectParam) {
+        mergedFilters["payload.commit.project_key"] = projectParam;
+      }
+      const res = await api.listDeadLettersPaginated(
+        params.pageIndex + 1,
+        params.pageSize,
+        sortBy,
+        sortDir,
+        mergedFilters
+      );
       setItems(res.items);
       setTotal(res.total || 0);
       setPageIndex(params.pageIndex);
@@ -122,9 +145,11 @@ export default function DeadLettersPage() {
         config_override: configDraft,
         config_source: "text",
       });
-  setItems((prev) => prev.map((item) => (item.id === updated.id ? updated : item)));
-  setSelected(updated);
-  selectedRef.current = updated;
+      setItems((prev) =>
+        prev.map((item) => (item.id === updated.id ? updated : item))
+      );
+      setSelected(updated);
+      selectedRef.current = updated;
       setActionMessage("Đã lưu cấu hình.");
     } catch (error: any) {
       setActionMessage(error.message);
@@ -138,7 +163,9 @@ export default function DeadLettersPage() {
       return;
     }
     if (!configDraft) {
-      setActionMessage("Vui lòng nhập nội dung sonar.properties trước khi retry.");
+      setActionMessage(
+        "Vui lòng nhập nội dung sonar.properties trước khi retry."
+      );
       return;
     }
     setBusy(true);
@@ -147,9 +174,11 @@ export default function DeadLettersPage() {
         config_override: configDraft,
         config_source: "text",
       });
-  setItems((prev) => prev.map((item) => (item.id === updated.id ? updated : item)));
-  setSelected(updated);
-  selectedRef.current = updated;
+      setItems((prev) =>
+        prev.map((item) => (item.id === updated.id ? updated : item))
+      );
+      setSelected(updated);
+      selectedRef.current = updated;
       setActionMessage("Đã gửi commit chạy lại.");
     } catch (error: any) {
       setActionMessage(error.message);
@@ -158,22 +187,32 @@ export default function DeadLettersPage() {
     }
   };
 
-  const statusOptions = useMemo(() => Array.from(new Set(items.map((item) => item.status))).sort(), [items]);
+  const statusOptions = useMemo(
+    () => Array.from(new Set(items.map((item) => item.status))).sort(),
+    [items]
+  );
 
   const columns = useMemo<ColumnDef<DeadLetter>[]>(
     () => [
       {
         accessorKey: "project",
         header: "Project",
-        accessorFn: (row) => (row.payload?.commit?.project_key as string) ?? "unknown",
-        cell: ({ row }) => <span className="font-medium">{row.original.payload?.commit?.project_key ?? "unknown"}</span>,
+        accessorFn: (row) =>
+          (row.payload?.commit?.project_key as string) ?? "unknown",
+        cell: ({ row }) => (
+          <span className="font-medium">
+            {row.original.payload?.commit?.project_key ?? "unknown"}
+          </span>
+        ),
       },
       {
         accessorKey: "commit_sha",
         header: "Commit",
         accessorFn: (row) => row.payload?.commit?.commit_sha ?? "",
         cell: ({ row }) => (
-          <span className="font-mono text-xs">{row.original.payload?.commit?.commit_sha ?? "-"}</span>
+          <span className="font-mono text-xs">
+            {row.original.payload?.commit?.commit_sha ?? "-"}
+          </span>
         ),
       },
       {
@@ -196,7 +235,11 @@ export default function DeadLettersPage() {
         header: "",
         meta: { className: "text-right", cellClassName: "text-right" },
         cell: ({ row }) => (
-          <Button size="sm" variant="outline" onClick={() => handleSelect(row.original)}>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => handleSelect(row.original)}
+          >
             Cấu hình
           </Button>
         ),
@@ -236,15 +279,31 @@ export default function DeadLettersPage() {
                 <Input
                   className="md:max-w-xs"
                   placeholder="Lọc theo project..."
-                  value={(table.getColumn("project")?.getFilterValue() as string) ?? ""}
-                  onChange={(event) => table.getColumn("project")?.setFilterValue(event.target.value)}
+                  value={
+                    (table.getColumn("project")?.getFilterValue() as string) ??
+                    ""
+                  }
+                  onChange={(event) =>
+                    table
+                      .getColumn("project")
+                      ?.setFilterValue(event.target.value)
+                  }
                 />
                 <div className="flex items-center gap-2">
-                  <span className="text-sm text-muted-foreground">Trạng thái</span>
+                  <span className="text-sm text-muted-foreground">
+                    Trạng thái
+                  </span>
                   <select
                     className="h-10 rounded-md border border-input bg-background px-3 text-sm"
-                    value={(table.getColumn("status")?.getFilterValue() as string) ?? ""}
-                    onChange={(event) => table.getColumn("status")?.setFilterValue(event.target.value || undefined)}
+                    value={
+                      (table.getColumn("status")?.getFilterValue() as string) ??
+                      ""
+                    }
+                    onChange={(event) =>
+                      table
+                        .getColumn("status")
+                        ?.setFilterValue(event.target.value || undefined)
+                    }
                   >
                     <option value="">Tất cả</option>
                     {statusOptions.map((status) => (
@@ -264,33 +323,51 @@ export default function DeadLettersPage() {
         <Card>
           <CardHeader>
             <CardTitle className="text-xl">
-              Chỉnh sonar.properties cho {selected.payload?.commit?.project_key ?? "unknown"}
+              Chỉnh sonar.properties cho{" "}
+              {selected.payload?.commit?.project_key ?? "unknown"}
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
             <p className="text-sm text-muted-foreground">
-              Lỗi: {selected.payload?.error ?? "Không rõ"} (commit {selected.payload?.commit?.commit_sha ?? "-"})
+              Lỗi: {selected.payload?.error ?? "Không rõ"} (commit{" "}
+              {selected.payload?.commit?.commit_sha ?? "-"})
             </p>
-            <Textarea value={configDraft} onChange={(event) => setConfigDraft(event.target.value)} />
+            <Textarea
+              value={configDraft}
+              onChange={(event) => setConfigDraft(event.target.value)}
+            />
             <div className="flex flex-wrap gap-3">
               <input
                 ref={fileInputRef}
                 type="file"
                 accept=".properties,.txt"
                 className="hidden"
-                onChange={(event) => handleImportFile(event.target.files?.[0] || null)}
+                onChange={(event) =>
+                  handleImportFile(event.target.files?.[0] || null)
+                }
               />
-              <Button type="button" variant="outline" onClick={() => fileInputRef.current?.click()}>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => fileInputRef.current?.click()}
+              >
                 Lấy nội dung từ file
               </Button>
               <Button type="button" onClick={handleSaveConfig} disabled={busy}>
                 {busy ? "Đang lưu..." : "Lưu config"}
               </Button>
-              <Button type="button" variant="secondary" onClick={handleRetry} disabled={busy}>
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={handleRetry}
+                disabled={busy}
+              >
                 {busy ? "Đang xử lý..." : "Lưu & Retry"}
               </Button>
             </div>
-            {actionMessage && <p className="text-sm text-slate-600">{actionMessage}</p>}
+            {actionMessage && (
+              <p className="text-sm text-slate-600">{actionMessage}</p>
+            )}
           </CardContent>
         </Card>
       )}

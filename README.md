@@ -48,6 +48,7 @@ See [INSTANCE_POOL_QUICKSTART.md](./docs/INSTANCE_POOL_QUICKSTART.md) for detail
 
 - [Instance Pool Architecture](./docs/INSTANCE_POOL_ARCHITECTURE.md) - Detailed system design
 - [Quick Start Guide](./docs/INSTANCE_POOL_QUICKSTART.md) - Usage and operations
+- [S3 Storage Setup](./docs/S3_STORAGE_SETUP.md) - Configure S3 for log storage (recommended for production)
 
 ## API Endpoints
 

@@ -17,6 +17,7 @@ from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
 from app.core.config import SonarInstanceSettings, settings
+from app.services.s3_service import s3_service
 
 LOG = logging.getLogger("pipeline.sonar")
 _RUNNER_CACHE: Dict[tuple[str, str], "SonarCommitRunner"] = {}
@@ -29,6 +30,7 @@ class CommitScanResult:
     output: str
     instance_name: str
     skipped: bool = False
+    s3_log_key: Optional[str] = None  # S3 key if uploaded to S3
 
 
 def normalize_repo_url(repo_url: Optional[str], repo_slug: Optional[str]) -> str:
@@ -231,16 +233,27 @@ class SonarCommitRunner:
             message = f"Component {component_key} already exists on {self.instance.name}; skipping scan."
             log_path.write_text(message, encoding="utf-8")
             LOG.info(message)
+            
+            # Upload log to S3 if enabled
+            s3_log_key = s3_service.upload_sonar_log(
+                log_content=message,
+                project_key=self.project_key,
+                commit_sha=commit_sha,
+                instance_name=self.instance.name,
+            )
+            
             return CommitScanResult(
                 component_key=component_key,
                 log_path=log_path,
                 output=message,
                 instance_name=self.instance.name,
                 skipped=True,
+                s3_log_key=s3_log_key,
             )
 
         worktree: Optional[Path] = None
         log_path = self.logs_dir / f"{commit_sha}.log"
+        s3_log_key: Optional[str] = None
         try:
             with self.repo_mutex():
                 self.refresh_repo(repo_url)
@@ -254,14 +267,34 @@ class SonarCommitRunner:
             LOG.debug("Scanning commit %s with command: %s", commit_sha, " ".join(cmd))
             output = run_command(cmd, cwd=worktree)
             log_path.write_text(output, encoding="utf-8")
+            
+            # Upload log to S3 if enabled
+            s3_log_key = s3_service.upload_sonar_log(
+                log_content=output,
+                project_key=self.project_key,
+                commit_sha=commit_sha,
+                instance_name=self.instance.name,
+            )
+            
             return CommitScanResult(
                 component_key=component_key,
                 log_path=log_path,
                 output=output,
                 instance_name=self.instance.name,
+                s3_log_key=s3_log_key,
             )
         except Exception as exc:
-            log_path.write_text(str(exc), encoding="utf-8")
+            error_message = str(exc)
+            log_path.write_text(error_message, encoding="utf-8")
+            
+            # Upload error log to S3 if enabled
+            s3_log_key = s3_service.upload_sonar_log(
+                log_content=error_message,
+                project_key=self.project_key,
+                commit_sha=commit_sha,
+                instance_name=self.instance.name,
+            )
+            
             raise
         finally:
             if worktree is not None:

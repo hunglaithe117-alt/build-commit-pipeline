@@ -88,6 +88,7 @@ class SonarRun(BaseModel):
     finished_at: Optional[datetime] = None
     metrics_path: Optional[str] = None
     log_path: Optional[str] = None
+    s3_log_key: Optional[str] = None
     message: Optional[str] = None
 
 

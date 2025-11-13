@@ -98,7 +98,11 @@ async def retry_dead_letter(
         commit["config_override"] = config_override
         commit["config_source"] = config_source
 
-    run_commit_scan.delay(job_id, data_source_id, commit)
+    run_commit_scan.apply_async(
+        args=(job_id, data_source_id, commit),
+        queue="pipeline.scan",
+        priority=9,
+    )
     updated = await run_in_threadpool(
         repository.update_dead_letter,
         dead_letter_id,

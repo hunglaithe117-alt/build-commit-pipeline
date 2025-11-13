@@ -32,19 +32,18 @@ async def list_jobs(
         sort_dir,
         parsed_filters,
     )
-    
+
     # Add failed_count for each job
     items_with_failed = []
     for job in result["items"]:
         job_dict = dict(job)
         # Count dead letters for this job
         failed_count = await run_in_threadpool(
-            repository.count_dead_letters_by_job,
-            job_dict["id"]
+            repository.count_dead_letters_by_job, job_dict["id"]
         )
         job_dict["failed_count"] = failed_count
         items_with_failed.append(Job(**job_dict))
-    
+
     return {"items": items_with_failed, "total": result["total"]}
 
 
@@ -54,69 +53,147 @@ async def get_workers_stats() -> dict:
         # Get active workers
         inspect = celery_app.control.inspect()
         active_tasks = inspect.active() or {}
-        
+
         # Get reserved tasks (queued but not yet running)
         reserved_tasks = inspect.reserved() or {}
-        
+
         # Get worker stats
         stats = inspect.stats() or {}
-        
-        # Calculate total workers and concurrency
-        total_workers = len(stats)
-        max_concurrency = settings.pipeline.sonar_parallelism
-        
-        # Process active tasks to get worker details
+
+        # Calculate total workers and concurrency for the scan queue.
+        total_workers = 0
+        max_concurrency = 0
+
+        try:
+            active_queues = inspect.active_queues() or {}
+        except Exception:
+            active_queues = {}
+
+        # Helper to extract concurrency from stats for a worker
+        def _extract_concurrency(worker_stats: dict) -> int:
+            if not isinstance(worker_stats, dict):
+                return 0
+            pool = worker_stats.get("pool") or {}
+            # Try multiple possible keys that may appear depending on pool impl
+            for key in (
+                "max-concurrency",
+                "max_concurrency",
+                "processes",
+                "maxchildren",
+                "max_children",
+            ):
+                val = pool.get(key) if isinstance(pool, dict) else None
+                if isinstance(val, int) and val > 0:
+                    return val
+                try:
+                    if val is not None:
+                        ival = int(val)
+                        if ival > 0:
+                            return ival
+                except Exception:
+                    pass
+            # fallback: some stats expose 'pool' as a string
+            try:
+                return int(
+                    worker_stats.get("max-concurrency")
+                    or worker_stats.get("max_concurrency")
+                    or 0
+                )
+            except Exception:
+                return 0
+
+        # Sum concurrency for workers that listen on pipeline.scan. If active_queues
+        # information isn't available, fall back to summing all workers.
+        scan_queue_name = "pipeline.scan"
+        scan_worker_concurrency: dict = {}
+        for worker_name, wstats in stats.items():
+            queues = []
+            try:
+                qinfo = active_queues.get(worker_name) or []
+                queues = [q.get("name") for q in qinfo if isinstance(q, dict)]
+            except Exception:
+                queues = []
+
+            concurrency = _extract_concurrency(wstats)
+            if queues:
+                if scan_queue_name in queues:
+                    max_concurrency += concurrency
+                    scan_worker_concurrency[worker_name] = concurrency
+            else:
+                # No queue info: include the worker conservatively
+                max_concurrency += concurrency
+                scan_worker_concurrency[worker_name] = concurrency
+
+        total_workers = (
+            len(scan_worker_concurrency) if scan_worker_concurrency else len(stats)
+        )
+
+        # Process active tasks to get worker details (only include scan workers)
         workers = []
         for worker_name, tasks in active_tasks.items():
+            # Only include workers that are consuming pipeline.scan
+            if scan_worker_concurrency and worker_name not in scan_worker_concurrency:
+                continue
+            worker_max = scan_worker_concurrency.get(worker_name, 0) or 0
             worker_info = {
                 "name": worker_name,
                 "active_tasks": len(tasks),
-                "max_concurrency": max_concurrency,
-                "tasks": []
+                "max_concurrency": worker_max,
+                "tasks": [],
             }
-            
+
             for task in tasks:
                 task_args = task.get("args", [])
                 task_kwargs = task.get("kwargs", {})
-                
+
                 # Extract commit and repo info from task arguments
                 current_commit = None
                 current_repo = None
-                
+
                 if task.get("name") == "app.tasks.sonar.run_commit_scan":
                     # Arguments: job_id, data_source_id, commit (dict)
                     if len(task_args) >= 3:
                         commit_data = task_args[2]
                         if isinstance(commit_data, dict):
                             current_commit = commit_data.get("commit_sha")
-                            current_repo = commit_data.get("repo_url") or commit_data.get("project_key")
+                            current_repo = commit_data.get(
+                                "repo_url"
+                            ) or commit_data.get("project_key")
                     elif "commit" in task_kwargs:
                         commit_data = task_kwargs["commit"]
                         if isinstance(commit_data, dict):
                             current_commit = commit_data.get("commit_sha")
-                            current_repo = commit_data.get("repo_url") or commit_data.get("project_key")
-                
-                worker_info["tasks"].append({
-                    "id": task.get("id"),
-                    "name": task.get("name"),
-                    "current_commit": current_commit,
-                    "current_repo": current_repo,
-                })
-            
+                            current_repo = commit_data.get(
+                                "repo_url"
+                            ) or commit_data.get("project_key")
+
+                worker_info["tasks"].append(
+                    {
+                        "id": task.get("id"),
+                        "name": task.get("name"),
+                        "current_commit": current_commit,
+                        "current_repo": current_repo,
+                    }
+                )
+
             workers.append(worker_info)
-        
+
         # Count total active scan tasks
         total_active_scans = sum(
-            len([t for t in tasks if t.get("name") == "app.tasks.sonar.run_commit_scan"])
+            len(
+                [t for t in tasks if t.get("name") == "app.tasks.sonar.run_commit_scan"]
+            )
             for tasks in active_tasks.values()
         )
-        
+
         # Count reserved scan tasks
         total_reserved_scans = sum(
-            len([t for t in tasks if t.get("name") == "app.tasks.sonar.run_commit_scan"])
+            len(
+                [t for t in tasks if t.get("name") == "app.tasks.sonar.run_commit_scan"]
+            )
             for tasks in reserved_tasks.values()
         )
-        
+
         return {
             "total_workers": total_workers,
             "max_concurrency": max_concurrency,

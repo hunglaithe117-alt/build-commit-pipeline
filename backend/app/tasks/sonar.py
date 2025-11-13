@@ -97,18 +97,22 @@ def process_commit(
         raise
 
     if result.skipped:
-        repository.upsert_sonar_run(
-            data_source_id=data_source_id,
-            project_key=project_key,
-            commit_sha=commit_sha,
-            job_id=job_id,
-            status="skipped",
-            log_path=str(result.log_path),
-            message=result.output,
-            component_key=result.component_key,
-            sonar_instance=result.instance_name,
-            sonar_host=instance.host,
-        )
+        update_kwargs = {
+            "data_source_id": data_source_id,
+            "project_key": project_key,
+            "commit_sha": commit_sha,
+            "job_id": job_id,
+            "status": "skipped",
+            "log_path": str(result.log_path),
+            "message": result.output,
+            "component_key": result.component_key,
+            "sonar_instance": result.instance_name,
+            "sonar_host": instance.host,
+        }
+        if result.s3_log_key:
+            update_kwargs["s3_log_key"] = result.s3_log_key
+        
+        repository.upsert_sonar_run(**update_kwargs)
         try:
             export_metrics.delay(result.component_key, job_id, data_source_id)
             logger.info(
@@ -123,17 +127,21 @@ def process_commit(
                 result.component_key,
             )
     else:
-        repository.upsert_sonar_run(
-            data_source_id=data_source_id,
-            project_key=project_key,
-            commit_sha=commit_sha,
-            job_id=job_id,
-            status="submitted",
-            log_path=str(result.log_path),
-            component_key=result.component_key,
-            sonar_instance=result.instance_name,
-            sonar_host=instance.host,
-        )
+        update_kwargs = {
+            "data_source_id": data_source_id,
+            "project_key": project_key,
+            "commit_sha": commit_sha,
+            "job_id": job_id,
+            "status": "submitted",
+            "log_path": str(result.log_path),
+            "component_key": result.component_key,
+            "sonar_instance": result.instance_name,
+            "sonar_host": instance.host,
+        }
+        if result.s3_log_key:
+            update_kwargs["s3_log_key"] = result.s3_log_key
+        
+        repository.upsert_sonar_run(**update_kwargs)
 
     updated_job = repository.update_job(
         job_id,

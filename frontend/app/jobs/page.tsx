@@ -8,6 +8,7 @@ import { DataTable } from "@/components/ui/data-table";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
+import Link from "next/link";
 import { api, Job, WorkersStats } from "@/lib/api";
 
 export default function JobsPage() {
@@ -59,9 +60,9 @@ export default function JobsPage() {
       sorting: null,
       filters: {},
     }).catch((err) => setError(err.message));
-    
+
     fetchWorkersStats();
-  }, []);
+  }, [pageIndex, handleServerChange, fetchWorkersStats]);
 
   // Auto-refresh current page and workers stats every 5 seconds
   useEffect(() => {
@@ -72,7 +73,7 @@ export default function JobsPage() {
         sorting: null,
         filters: {},
       }).catch(console.error);
-      
+
       fetchWorkersStats();
     }, 5000);
     return () => clearInterval(interval);
@@ -116,7 +117,9 @@ export default function JobsPage() {
                 </span>
               </div>
               <div className="text-xs text-slate-500 flex items-center gap-2">
-                <span>{row.original.processed} / {row.original.total} commits</span>
+                <span>
+                  {row.original.processed} / {row.original.total} commits
+                </span>
                 {failedCount > 0 && (
                   <span className="text-red-600 font-medium">
                     • {failedCount} lỗi
@@ -141,6 +144,70 @@ export default function JobsPage() {
           </span>
         ),
       },
+      {
+        id: "actions",
+        header: "Hành động",
+        cell: ({ row }) => {
+          const failed = row.original.failed_count || 0;
+          return (
+            <div className="flex items-center gap-2">
+              {failed > 0 && (
+                <button
+                  className="text-xs text-red-600 hover:underline"
+                  onClick={async () => {
+                    const ok = confirm(
+                      `Retry ${failed} failed commit(s) for job ${row.original.id.slice(
+                        -8
+                      )}?`
+                    );
+                    if (!ok) return;
+                    try {
+                      // Fetch pending dead letters for this job
+                      const res = await api.listDeadLettersPaginated(
+                        1,
+                        1000,
+                        undefined,
+                        undefined,
+                        { "payload.job_id": row.original.id, status: "pending" }
+                      );
+                      const items = res.items || [];
+                      for (const item of items) {
+                        try {
+                          await api.retryDeadLetter(item.id, {});
+                        } catch (e) {
+                          console.error(
+                            "Failed to retry dead letter",
+                            item.id,
+                            e
+                          );
+                        }
+                      }
+                      // Refresh jobs and workers
+                      handleServerChange({
+                        pageIndex,
+                        pageSize: 20,
+                        sorting: null,
+                        filters: {},
+                      });
+                      fetchWorkersStats();
+                      alert(
+                        `Enqueued ${items.length} retried commit(s) at high priority.`
+                      );
+                    } catch (err) {
+                      console.error(err);
+                      alert(
+                        "Failed to enqueue retries. Check console for details."
+                      );
+                    }
+                  }}
+                >
+                  Retry
+                </button>
+              )}
+            </div>
+          );
+        },
+      },
     ];
   }, []);
 
@@ -149,32 +216,42 @@ export default function JobsPage() {
       {/* Workers Stats Card */}
       <Card>
         <CardHeader>
-          <CardTitle className="text-xl">Thông tin Workers SonarScanner</CardTitle>
+          <CardTitle className="text-xl">
+            Thông tin Workers SonarScanner
+          </CardTitle>
         </CardHeader>
         <CardContent>
           {workersStats ? (
             <div className="space-y-4">
               <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                 <div className="bg-blue-50 rounded-lg p-4 border border-blue-200">
-                  <div className="text-sm text-blue-600 font-medium">Số Workers</div>
+                  <div className="text-sm text-blue-600 font-medium">
+                    Số Workers
+                  </div>
                   <div className="text-2xl font-bold text-blue-900 mt-1">
                     {workersStats.total_workers}
                   </div>
                 </div>
                 <div className="bg-green-50 rounded-lg p-4 border border-green-200">
-                  <div className="text-sm text-green-600 font-medium">Concurrency (max)</div>
+                  <div className="text-sm text-green-600 font-medium">
+                    Concurrency (max)
+                  </div>
                   <div className="text-2xl font-bold text-green-900 mt-1">
                     {workersStats.max_concurrency}
                   </div>
                 </div>
                 <div className="bg-purple-50 rounded-lg p-4 border border-purple-200">
-                  <div className="text-sm text-purple-600 font-medium">Đang scan</div>
+                  <div className="text-sm text-purple-600 font-medium">
+                    Đang scan
+                  </div>
                   <div className="text-2xl font-bold text-purple-900 mt-1">
                     {workersStats.active_scan_tasks}
                   </div>
                 </div>
                 <div className="bg-orange-50 rounded-lg p-4 border border-orange-200">
-                  <div className="text-sm text-orange-600 font-medium">Đang chờ</div>
+                  <div className="text-sm text-orange-600 font-medium">
+                    Đang chờ
+                  </div>
                   <div className="text-2xl font-bold text-orange-900 mt-1">
                     {workersStats.queued_scan_tasks}
                   </div>
@@ -184,9 +261,14 @@ export default function JobsPage() {
               {/* Worker Details */}
               {workersStats.workers.length > 0 && (
                 <div className="space-y-3 mt-6">
-                  <h3 className="font-semibold text-sm text-slate-700">Chi tiết Workers:</h3>
+                  <h3 className="font-semibold text-sm text-slate-700">
+                    Chi tiết Workers:
+                  </h3>
                   {workersStats.workers.map((worker, idx) => (
-                    <div key={idx} className="border rounded-lg p-4 bg-slate-50">
+                    <div
+                      key={idx}
+                      className="border rounded-lg p-4 bg-slate-50"
+                    >
                       <div className="flex items-center justify-between mb-3">
                         <div className="font-medium text-sm text-slate-900">
                           {worker.name}
@@ -195,22 +277,42 @@ export default function JobsPage() {
                           {worker.active_tasks} / {worker.max_concurrency} tasks
                         </div>
                       </div>
-                      
+
                       {worker.tasks.length > 0 && (
                         <div className="space-y-2">
                           {worker.tasks.map((task, taskIdx) => (
-                            <div key={taskIdx} className="bg-white rounded p-3 text-xs border border-slate-200">
+                            <div
+                              key={taskIdx}
+                              className="bg-white rounded p-3 text-xs border border-slate-200"
+                            >
                               <div className="grid grid-cols-2 gap-2">
                                 <div>
-                                  <span className="font-semibold text-slate-600">Commit:</span>{" "}
+                                  <span className="font-semibold text-slate-600">
+                                    Commit:
+                                  </span>{" "}
                                   <span className="font-mono text-slate-800">
-                                    {task.current_commit?.substring(0, 8) || "N/A"}
+                                    {task.current_commit?.substring(0, 8) ||
+                                      "N/A"}
                                   </span>
                                 </div>
                                 <div className="truncate">
-                                  <span className="font-semibold text-slate-600">Repo:</span>{" "}
+                                  <span className="font-semibold text-slate-600">
+                                    Repo:
+                                  </span>{" "}
                                   <span className="text-slate-800">
-                                    {task.current_repo || "N/A"}
+                                    {task.current_repo ? (
+                                      <Link
+                                        href={`/dead-letters?project=${encodeURIComponent(
+                                          task.current_repo
+                                        )}`}
+                                      >
+                                        <span className="hover:underline">
+                                          {task.current_repo}
+                                        </span>
+                                      </Link>
+                                    ) : (
+                                      "N/A"
+                                    )}
                                   </span>
                                 </div>
                               </div>
@@ -218,9 +320,11 @@ export default function JobsPage() {
                           ))}
                         </div>
                       )}
-                      
+
                       {worker.tasks.length === 0 && (
-                        <div className="text-xs text-slate-500 italic">Không có task đang chạy</div>
+                        <div className="text-xs text-slate-500 italic">
+                          Không có task đang chạy
+                        </div>
                       )}
                     </div>
                   ))}
@@ -240,7 +344,9 @@ export default function JobsPage() {
               )}
             </div>
           ) : (
-            <div className="text-sm text-slate-500">Đang tải thông tin workers...</div>
+            <div className="text-sm text-slate-500">
+              Đang tải thông tin workers...
+            </div>
           )}
         </CardContent>
       </Card>
