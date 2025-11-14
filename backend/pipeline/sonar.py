@@ -120,6 +120,58 @@ class SonarCommitRunner:
         )
         return completed.returncode == 0
 
+    def _fetch_commit_from_fork(
+        self, repo: Path, commit_sha: str, fork_url: str
+    ) -> bool:
+        """
+        Fetch a specific commit from a fork repository.
+        Returns True if successful, False otherwise.
+        """
+        try:
+            # Remove existing fork remote if any
+            run_command(
+                ["git", "remote", "remove", "fork"],
+                cwd=repo,
+                allow_fail=True,
+            )
+
+            # Add fork as temporary remote
+            run_command(
+                ["git", "remote", "add", "fork", fork_url],
+                cwd=repo,
+                allow_fail=False,
+            )
+
+            # Fetch the specific commit from the fork
+            # This is more reliable than fetching all branches
+            LOG.info(
+                "Fetching commit %s from fork %s",
+                commit_sha,
+                fork_url,
+            )
+            run_command(
+                ["git", "fetch", "fork", commit_sha],
+                cwd=repo,
+                allow_fail=False,
+            )
+
+            # Verify the commit now exists
+            if self._commit_exists(repo, commit_sha):
+                LOG.info("Successfully fetched commit %s from fork", commit_sha)
+                return True
+            else:
+                LOG.warning("Commit %s still not found after fork fetch", commit_sha)
+                return False
+
+        except Exception as exc:
+            LOG.warning(
+                "Failed to fetch commit %s from fork %s: %s",
+                commit_sha,
+                fork_url,
+                exc,
+            )
+            return False
+
     # def checkout_commit(self, commit_sha: str) -> None:
     #     run_command(["git", "checkout", "-f", commit_sha], cwd=self.repo_dir)
     #     run_command(["git", "clean", "-fdx"], cwd=self.repo_dir, allow_fail=True)
@@ -262,37 +314,43 @@ class SonarCommitRunner:
         try:
             with self.repo_mutex():
                 self.refresh_repo(repo_url)
+                repo = self.repo_dir
+
                 # If the commit object is missing after a normal fetch, it may live
                 # on a different remote (e.g. a fork). Try to fetch from a fallback
                 # remote derived from repo_slug if provided.
-                repo = self.repo_dir
-                if not self._commit_exists(repo, commit_sha) and repo_slug:
-                    try:
-                        fallback_url = normalize_repo_url(None, repo_slug)
-                    except Exception:
-                        fallback_url = None
+                if not self._commit_exists(repo, commit_sha):
+                    if repo_slug:
+                        try:
+                            fallback_url = normalize_repo_url(None, repo_slug)
+                        except Exception:
+                            fallback_url = None
 
-                    if fallback_url and fallback_url != repo_url:
-                        LOG.info(
-                            "Commit %s not found in origin; attempting fetch from fork remote %s",
+                        if fallback_url and fallback_url != repo_url:
+                            # Try to fetch the specific commit from the fork
+                            if self._fetch_commit_from_fork(
+                                repo, commit_sha, fallback_url
+                            ):
+                                LOG.info(
+                                    "Successfully retrieved commit %s from fork",
+                                    commit_sha,
+                                )
+                            else:
+                                LOG.error(
+                                    "Commit %s not found in origin or fork repository %s",
+                                    commit_sha,
+                                    fallback_url,
+                                )
+                                raise RuntimeError(
+                                    f"Commit {commit_sha} not found in origin or fork repository"
+                                )
+                    else:
+                        LOG.error(
+                            "Commit %s not found and no repo_slug provided to fetch from fork",
                             commit_sha,
-                            fallback_url,
                         )
-                        # ensure any previous 'fork' remote is removed
-                        run_command(
-                            ["git", "remote", "remove", "fork"],
-                            cwd=repo,
-                            allow_fail=True,
-                        )
-                        run_command(
-                            ["git", "remote", "add", "fork", fallback_url],
-                            cwd=repo,
-                            allow_fail=True,
-                        )
-                        run_command(
-                            ["git", "fetch", "fork", "--tags", "--prune"],
-                            cwd=repo,
-                            allow_fail=True,
+                        raise RuntimeError(
+                            f"Commit {commit_sha} not found in repository"
                         )
 
                 # Now attempt to create the worktree (will raise if commit still missing)
