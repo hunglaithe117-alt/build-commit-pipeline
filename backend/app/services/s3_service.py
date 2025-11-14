@@ -206,26 +206,6 @@ class S3Service:
             return s3_key
         return None
 
-    def upload_dead_letter(
-        self, content: str, filename: str, content_type: str = "application/json"
-    ) -> Optional[str]:
-        """
-        Upload a dead letter file to S3.
-
-        Args:
-            content: The content to upload
-            filename: The filename
-            content_type: Content type for the file
-
-        Returns:
-            The S3 key if successful, None otherwise
-        """
-        s3_key = f"{settings.s3.dead_letter_prefix}/{filename}"
-
-        if self.upload_text(content, s3_key, content_type=content_type):
-            return s3_key
-        return None
-
     def upload_error_log(self, log_content: str, filename: str) -> Optional[str]:
         """
         Upload an error log to S3.

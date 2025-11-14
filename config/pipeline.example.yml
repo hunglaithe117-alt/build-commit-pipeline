@@ -4,8 +4,19 @@ logging:
 paths:
   uploads: /app/data/uploads
   exports: /app/data/exports
-  dead_letter: /app/data/dead_letter
   default_workdir: /app/data/sonar-work
+s3:
+  enabled: true
+  bucket_name: sonar-log-117
+  region: us-east-1
+  # Optional: Use IAM role on EC2 instead of credentials
+  # access_key_id: YOUR_ACCESS_KEY_ID
+  # secret_access_key: YOUR_SECRET_ACCESS_KEY
+  # Optional: For custom S3-compatible endpoints (e.g., MinIO)
+  # endpoint_url: http://minio:9000
+  # Prefixes for organizing logs
+  sonar_logs_prefix: sonar-logs
+  error_logs_prefix: error-logs
 mongo:
   uri: mongodb://travis:travis@mongo:27017
   database: travistorrent_pipeline
@@ -15,7 +26,6 @@ broker:
   url: amqp://pipeline:pipeline@rabbitmq:5672//
   result_backend: rpc://
   default_queue: pipeline.default
-  dead_letter_queue: pipeline.dlq
 pipeline:
   ingestion_chunk_size: 2000
 sonarqube:

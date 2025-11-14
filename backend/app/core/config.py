@@ -31,7 +31,6 @@ class BrokerSettings(BaseModel):
     url: str = Field(default="amqp://pipeline:pipeline@rabbitmq:5672//")
     result_backend: str = Field(default="rpc://")
     default_queue: str = Field(default="pipeline.default")
-    dead_letter_queue: str = Field(default="pipeline.dlq")
 
 
 class PipelineTuning(BaseModel):
@@ -109,7 +108,6 @@ class S3Settings(BaseModel):
     secret_access_key: Optional[str] = Field(default=None)
     endpoint_url: Optional[str] = Field(default=None)
     sonar_logs_prefix: str = Field(default="sonar-logs")
-    dead_letter_prefix: str = Field(default="dead-letters")
     error_logs_prefix: str = Field(default="error-logs")
 
 

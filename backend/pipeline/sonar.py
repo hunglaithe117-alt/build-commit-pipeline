@@ -239,7 +239,7 @@ class SonarCommitRunner:
         if self.project_exists(component_key):
             message = f"Component {component_key} already exists on {self.instance.name}; skipping scan."
             LOG.info(message)
-            
+
             # Upload log to S3 if enabled
             s3_log_key = s3_service.upload_sonar_log(
                 log_content=message,
@@ -247,7 +247,7 @@ class SonarCommitRunner:
                 commit_sha=commit_sha,
                 instance_name=self.instance.name,
             )
-            
+
             return CommitScanResult(
                 component_key=component_key,
                 log_path=None,
@@ -279,9 +279,21 @@ class SonarCommitRunner:
                             fallback_url,
                         )
                         # ensure any previous 'fork' remote is removed
-                        run_command(["git", "remote", "remove", "fork"], cwd=repo, allow_fail=True)
-                        run_command(["git", "remote", "add", "fork", fallback_url], cwd=repo, allow_fail=True)
-                        run_command(["git", "fetch", "fork", "--tags", "--prune"], cwd=repo, allow_fail=True)
+                        run_command(
+                            ["git", "remote", "remove", "fork"],
+                            cwd=repo,
+                            allow_fail=True,
+                        )
+                        run_command(
+                            ["git", "remote", "add", "fork", fallback_url],
+                            cwd=repo,
+                            allow_fail=True,
+                        )
+                        run_command(
+                            ["git", "fetch", "fork", "--tags", "--prune"],
+                            cwd=repo,
+                            allow_fail=True,
+                        )
 
                 # Now attempt to create the worktree (will raise if commit still missing)
                 worktree = self.create_worktree(commit_sha)
@@ -293,7 +305,7 @@ class SonarCommitRunner:
             )
             LOG.debug("Scanning commit %s with command: %s", commit_sha, " ".join(cmd))
             output = run_command(cmd, cwd=worktree)
-            
+
             # Upload log to S3 if enabled
             s3_log_key = s3_service.upload_sonar_log(
                 log_content=output,
@@ -301,7 +313,7 @@ class SonarCommitRunner:
                 commit_sha=commit_sha,
                 instance_name=self.instance.name,
             )
-            
+
             return CommitScanResult(
                 component_key=component_key,
                 log_path=None,
@@ -311,15 +323,15 @@ class SonarCommitRunner:
             )
         except Exception as exc:
             error_message = str(exc)
-            
+
             # Upload error log to S3 if enabled
-            s3_service.upload_sonar_log(
+            s3_service.upload_error_log(
                 log_content=error_message,
                 project_key=self.project_key,
                 commit_sha=commit_sha,
                 instance_name=self.instance.name,
             )
-            
+
             raise
         finally:
             if worktree is not None:
@@ -429,7 +441,7 @@ class MetricsExporter:
             try:
                 handle.seek(0, os.SEEK_END)
                 file_was_empty = handle.tell() == 0
-                
+
                 handle.seek(0)
                 if file_was_empty:
                     writer = csv.writer(handle, quoting=csv.QUOTE_MINIMAL)
@@ -437,7 +449,7 @@ class MetricsExporter:
                     record_count = 0
                 else:
                     record_count = max(sum(1 for _ in handle) - 1, 0)
-                
+
                 handle.seek(0, os.SEEK_END)
                 writer = csv.writer(handle, quoting=csv.QUOTE_MINIMAL)
                 writer.writerow(row)

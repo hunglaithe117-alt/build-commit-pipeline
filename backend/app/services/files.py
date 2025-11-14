@@ -18,8 +18,6 @@ class LocalFileService:
         self.upload_dir.mkdir(parents=True, exist_ok=True)
         self.exports_dir = Path(settings.paths.exports)
         self.exports_dir.mkdir(parents=True, exist_ok=True)
-        self.dead_letter_dir = Path(settings.paths.dead_letter)
-        self.dead_letter_dir.mkdir(parents=True, exist_ok=True)
         self.config_dir = self.upload_dir / "configs"
         self.config_dir.mkdir(parents=True, exist_ok=True)
 
@@ -35,11 +33,6 @@ class LocalFileService:
         destination = self.exports_dir / (name or source.name)
         shutil.copy2(source, destination)
         return destination
-
-    def write_dead_letter(self, payload: str, identifier: str) -> Path:
-        target = self.dead_letter_dir / f"{identifier}.json"
-        target.write_text(payload, encoding="utf-8")
-        return target
 
     @staticmethod
     def _slugify(value: str) -> str:
