@@ -206,18 +206,41 @@ class S3Service:
             return s3_key
         return None
 
-    def upload_error_log(self, log_content: str, filename: str) -> Optional[str]:
+    def upload_error_log(
+        self,
+        log_content: str,
+        filename: Optional[str] = None,
+        *,
+        project_key: Optional[str] = None,
+        commit_sha: Optional[str] = None,
+        instance_name: str = "primary",
+    ) -> Optional[str]:
         """
         Upload an error log to S3.
 
+        Supports either passing a pre-built `filename` or the tuple
+        (`project_key`, `commit_sha`, `instance_name`) which will be
+        rendered into a filename under the configured `error_logs_prefix`.
+
         Args:
             log_content: The log content to upload
-            filename: The filename
+            filename: Optional filename to use directly
+            project_key: Optional Sonar project key
+            commit_sha: Optional commit SHA
+            instance_name: Sonar instance name (used when building filename)
 
         Returns:
             The S3 key if successful, None otherwise
         """
-        s3_key = f"{settings.s3.error_logs_prefix}/{filename}"
+        if filename:
+            s3_key = f"{settings.s3.error_logs_prefix}/{filename}"
+        elif project_key and commit_sha:
+            s3_key = f"{settings.s3.error_logs_prefix}/{instance_name}/{project_key}/{commit_sha}.log"
+        else:
+            LOG.error(
+                "upload_error_log requires either filename or project_key+commit_sha"
+            )
+            return None
 
         if self.upload_text(log_content, s3_key, content_type="text/plain"):
             return s3_key

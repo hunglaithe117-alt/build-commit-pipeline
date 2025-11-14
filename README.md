@@ -206,6 +206,7 @@ source .venv/bin/activate
 uv run uvicorn app.main:app --reload
 # chạy celery worker trong terminal khác
 uv run celery -A app.celery_app.celery_app worker -l info
+dokcer pull sonarsource/sonar-scanner-cli
 ```
 
 Frontend (cục bộ):
