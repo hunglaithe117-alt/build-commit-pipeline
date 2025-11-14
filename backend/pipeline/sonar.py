@@ -228,28 +228,18 @@ class SonarCommitRunner:
             "-Dsonar.java.binaries=.",
         ]
 
+        # Use local sonar-scanner binary installed in the image.
         if config_path:
-            scanner_args.append(f"-Dproject.settings=/usr/src/{config_path.name}")
+            scanner_args.append(f"-Dproject.settings={str(config_path)}")
 
-        docker_cmd = [
-            "docker",
-            "run",
-            "--rm",
-            "--network=host",
-            "-v",
-            f"{working_dir}:/usr/src",
-            "-v",
-            f"{self.work_dir}:{self.work_dir}:ro",
-            "sonarsource/sonar-scanner-cli",
-        ]
-        if config_path:
-            container_config_path = "/tmp/sonar-project.properties"
-            docker_cmd.extend(["-v", f"{config_path}:{container_config_path}:ro"])
-            scanner_args.append(f"-Dproject.settings={container_config_path}")
+        scanner_exe = os.environ.get("SONAR_SCANNER_HOME", "")
+        if scanner_exe:
+            scanner_exe = os.path.join(scanner_exe, "bin", "sonar-scanner")
+        else:
+            scanner_exe = "sonar-scanner"
 
-        docker_cmd.extend(scanner_args)
-
-        return docker_cmd
+        cmd = [scanner_exe, *scanner_args]
+        return cmd
 
     def project_exists(self, component_key: str) -> bool:
         url = f"{self.host}/api/projects/search"

@@ -178,8 +178,6 @@ def process_commit(
 @celery_app.task(
     bind=True,
     autoretry_for=(Exception,),
-    retry_backoff=True,
-    retry_kwargs={"max_retries": 3},
 )
 def run_commit_scan(
     self, job_id: str, data_source_id: str, commit: Dict[str, str]
@@ -229,8 +227,6 @@ def run_commit_scan(
 @celery_app.task(
     bind=True,
     autoretry_for=(Exception,),
-    retry_backoff=True,
-    retry_kwargs={"max_retries": 3},
 )
 def export_metrics(
     self,

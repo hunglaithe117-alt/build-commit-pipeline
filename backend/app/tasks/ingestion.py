@@ -19,8 +19,6 @@ logger = get_task_logger(__name__)
 @celery_app.task(
     bind=True,
     autoretry_for=(Exception,),
-    retry_backoff=True,
-    retry_kwargs={"max_retries": 3},
 )
 def ingest_data_source(self, data_source_id: str) -> dict:
     data_source = repository.get_data_source(data_source_id)

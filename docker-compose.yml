@@ -40,9 +40,10 @@ services:
       context: ./backend
     container_name: build_commit_worker_scan
     command: celery -A app.celery_app.celery_app worker --loglevel=info -Q pipeline.scan -n scan.%h -c 4
-    user: "${APP_UID:-1000}:${APP_GID:-1000}"
     environment:
       PIPELINE_CONFIG: /app/config/pipeline.yml
+      # JVM options for the sonar-scanner binary. Tweak -Xmx/-Xms to match host resources.
+      SONAR_SCANNER_OPTS: "-Xmx2g -Xms512m"
     volumes:
       - ./backend:/app
       - ./config/pipeline.yml:/app/config/pipeline.yml:ro

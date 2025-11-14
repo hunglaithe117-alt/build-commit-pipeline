@@ -15,9 +15,6 @@ class PathsSettings(BaseModel):
     uploads: Path = Field(default=Path("/app/data/uploads"))
     exports: Path = Field(default=Path("/app/data/exports"))
     dead_letter: Path = Field(default=Path("/app/data/dead_letter"))
-    sonar_instances_config: Path = Field(
-        default=Path("/app/sonar-scan/sonar_instances.example.json")
-    )
     default_workdir: Path = Field(default=Path("/app/data/sonar-work"))
 
 
