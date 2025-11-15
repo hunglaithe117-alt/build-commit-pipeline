@@ -4,11 +4,10 @@ import Link from "next/link";
 import "./globals.css";
 
 const navLinks = [
-  { href: "/data-sources", label: "Nguồn dữ liệu" },
-  { href: "/jobs", label: "Thu thập" },
-  { href: "/sonar-runs", label: "SonarQube" },
-  { href: "/outputs", label: "Dữ liệu đầu ra" },
-  { href: "/dead-letters", label: "Deadletter" },
+  { href: "/projects", label: "Projects" },
+  { href: "/jobs", label: "Scan jobs" },
+  { href: "/sonar-runs", label: "Scan results" },
+  { href: "/failed-commits", label: "Failed commits" },
 ];
 
 export const metadata: Metadata = {

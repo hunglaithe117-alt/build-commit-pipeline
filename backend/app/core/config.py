@@ -14,10 +14,6 @@ from pydantic import BaseModel, Field
 class PathsSettings(BaseModel):
     uploads: Path = Field(default=Path("/app/data/uploads"))
     exports: Path = Field(default=Path("/app/data/exports"))
-    dead_letter: Path = Field(default=Path("/app/data/dead_letter"))
-    sonar_instances_config: Path = Field(
-        default=Path("/app/sonar-scan/sonar_instances.example.json")
-    )
     default_workdir: Path = Field(default=Path("/app/data/sonar-work"))
 
 
@@ -35,9 +31,7 @@ class BrokerSettings(BaseModel):
 
 class PipelineTuning(BaseModel):
     ingestion_chunk_size: int = Field(default=2000)
-    sonar_parallelism: int = Field(default=8)
-    resume_failed_commits: bool = Field(default=True)
-    default_retry_limit: int = Field(default=5)
+    default_retry_limit: int = Field(default=3)
     csv_encoding: str = Field(default="utf-8")
 
 
@@ -80,11 +74,10 @@ class SonarSettings(BaseModel):
 
 
 class StorageCollections(BaseModel):
-    data_sources_collection: str = Field(default="data_sources")
-    jobs_collection: str = Field(default="jobs")
-    sonar_runs_collection: str = Field(default="sonar_runs")
-    dead_letter_collection: str = Field(default="dead_letters")
-    outputs_collection: str = Field(default="outputs")
+    projects_collection: str = Field(default="projects")
+    scan_jobs_collection: str = Field(default="scan_jobs")
+    scan_results_collection: str = Field(default="scan_results")
+    failed_commits_collection: str = Field(default="failed_commits")
 
 
 class WebSettings(BaseModel):

@@ -3,38 +3,23 @@ server:
   grpc_listen_port: 0
 
 positions:
-  filename: /tmp/promtail-positions.yaml
+  filename: /var/promtail/positions.yaml
 
 clients:
   - url: http://loki:3100/loki/api/v1/push
 
 scrape_configs:
-  - job_name: docker-containers
+  - job_name: docker
     pipeline_stages:
       - docker: {}
-    static_configs:
-      - targets: [localhost]
-        labels:
-          job: docker-containers
-          __path__: /var/lib/docker/containers/*/*-json.log
-
-  - job_name: pipeline-sonar-logs
-    static_configs:
-      - targets: [localhost]
-        labels:
-          job: sonar-commit-logs
-          __path__: /var/pipeline-data/sonar-work/*/*/logs/*.log
-
-  - job_name: pipeline-dead-letter
-    static_configs:
-      - targets: [localhost]
-        labels:
-          job: dead-letter
-          __path__: /var/pipeline-data/dead_letter/*.json
-
-  - job_name: pipeline-error-files
-    static_configs:
-      - targets: [localhost]
-        labels:
-          job: pipeline-error-files
-          __path__: /var/pipeline-data/error_logs/*.log
+    docker_sd_configs:
+      - host: unix:///var/run/docker.sock
+    relabel_configs:
+      - source_labels: ['__meta_docker_container_name']
+        target_label: container
+      - source_labels: ['__meta_docker_container_label_com_docker_compose_project']
+        target_label: compose_project
+      - source_labels: ['__meta_docker_container_label_com_docker_compose_service']
+        target_label: service
+      - source_labels: ['__meta_docker_container_log_stream']
+        target_label: stream

@@ -1,215 +1,283 @@
 # Build Commit Pipeline
 
-Pipeline orchestrator for TravisTorrent data ingestion and SonarQube enrichment with **distributed instance pooling**.
+Pipeline for TravisTorrent data ingestion and SonarQube enrichment.
 
 ## Features
 
-- **Multi-Instance SonarQube Pool**: Process commits across multiple SonarQube instances in parallel
-- **Redis Distributed Locks**: Ensure per-instance concurrency = 1 while allowing global concurrency > 1
-- **High Throughput**: Process multiple commits simultaneously with automatic load balancing
-- **Fault Tolerant**: Auto-retry with exponential backoff, auto-expiring locks prevent deadlocks
-- **Observable**: Real-time instance status monitoring via REST API
+- **Project-centric ingestion**: Upload một CSV là tạo ngay record `Project`, Celery tự sinh `ScanJob` cho từng commit và theo dõi tiến độ/ thống kê.
+- **Multi-Instance SonarQube Pool**: Process commits across multiple SonarQube instances in parallel.
+- **At-least-once scan jobs**: Từng job luôn nằm trong Mongo với trạng thái rõ ràng (`PENDING/RUNNING/SUCCESS/FAILED_TEMP/FAILED_PERMANENT`). Những commit `FAILED_PERMANENT` tự động xuất hiện ở trang “Failed commits” để chỉnh sonar.properties và retry.
+- **Persistent metrics**: Kết quả SonarQube cho từng commit được lưu trong `scan_results`. API `/projects/{id}/results/export` để bạn tải toàn bộ metrics cho một project.
+- **Fault Tolerant**: Auto-retry với giới hạn `max_retries`, worker chết không làm mất job (Celery `acks_late + reject_on_worker_lost`).
+- **Observable**: UI hiển thị workers stats, scan jobs, failed commits và export kết quả.
 
-## Architecture
+### Thành phần chính
 
-```
-Celery Workers (concurrency=4) 
-    ↓
-Redis Lock Manager (round-robin)
-    ↓
-SonarQube Instances (2+)
-    - primary: localhost:9001
-    - secondary: sonarqube2:9002
-```
+| Thành phần | Ý nghĩa |
+|------------|---------|
+| `projects` | Metadata dataset (CSV path, tổng commits/builds, sonar config). |
+| `scan_jobs` | Một commit cần quét Sonar. Thay vì queue ẩn, mọi trạng thái lưu trong Mongo. |
+| `scan_results` | Metrics lấy từ Sonar API (bugs, vulnerabilities, coverage, …). |
+| `failed_commits` | Nhật ký các job `FAILED_PERMANENT` kèm payload + config override để người vận hành retry thủ công. |
 
-**Key Principle**: Global concurrency > 1, but each SonarQube instance handles max 1 job at a time (SonarQube CE limitation).
+API chính:
 
-## Quick Start
+- `POST /projects` tải CSV + sonar.properties (tuỳ chọn). Trả về project và số commit sẽ được tạo.
+- `POST /projects/{id}/collect` tạo scan jobs cho toàn bộ commit trong CSV.
+- `GET /scan-jobs` phân trang scan job (lọc theo trạng thái, project, v.v…).
+- `POST /scan-jobs/{id}/retry` nạp lại commit với sonar config mới.
+- `GET /failed-commits` thay thế dead-letter cũ; trả về payload thất bại để giám sát/ghi chú.
+- `GET /projects/{id}/results/export` stream CSV metrics đã thu thập.
 
-```bash
-# Start all services
-docker-compose up -d
+````markdown
+# Build Commit Pipeline (Hướng dẫn nhanh)
 
-# Monitor workers
-Use the API or container logs to observe parallel sonar-scanner workers. For example:
+Repository này cung cấp một pipeline gồm API + Celery workers để clone repository, chạy SonarQube analysis và xuất metrics.
 
-```bash
-# View worker logs
-docker-compose logs -f worker
-```
+Mục tiêu của bản README này:
+- Liệt kê những gì cần tải/cài đặt
+- Hướng dẫn cấu hình cơ bản
+- Giải thích cách SonarScanner được chạy và các phương án (khuyến nghị)
+- Các lệnh để khởi động và kiểm tra dịch vụ
 
-# View worker logs
-docker-compose logs -f worker
-```
+**1) Yêu cầu trước khi chạy (host)**
+- Docker Desktop (macOS) / Docker Engine và `docker compose` (https://docs.docker.com/get-docker/)
+- Git (để worker clone repo)
+- (Tùy chọn) Node.js >= 18 + npm/yarn nếu muốn chạy frontend cục bộ
 
-See [INSTANCE_POOL_QUICKSTART.md](./docs/INSTANCE_POOL_QUICKSTART.md) for detailed usage.
+**2) Tệp cấu hình chính**
+- `config/pipeline.yml` — cấu hình pipeline (Mongo, RabbitMQ, SonarQube instances, đường dẫn lưu trữ).
 
-## Documentation
 
-- [Instance Pool Architecture](./docs/INSTANCE_POOL_ARCHITECTURE.md) - Detailed system design
-- [Quick Start Guide](./docs/INSTANCE_POOL_QUICKSTART.md) - Usage and operations
-- [S3 Storage Setup](./docs/S3_STORAGE_SETUP.md) - Configure S3 for log storage (recommended for production)
+Hãy chắc chắn bạn đã chỉnh `config/pipeline.yml`:
+- `sonarqube.instances[].host` → URL SonarQube (ví dụ `http://sonarqube:9001`)
+- `sonarqube.instances[].token` → token truy cập SonarQube (bắt buộc khi gọi API)
+- `paths.default_workdir` → nơi lưu các clone/worktree (mặc định `/app/data/sonar-work`), đảm bảo `./data` trên host có quyền ghi.
 
-## API Endpoints
-
-### Sonar / Jobs API
-The primary API for pipeline control is focused on queuing jobs and viewing scan/export results. Use the `jobs`, `sonar` and `outputs` endpoints to submit work and inspect results.
-
-### Data Sources & Jobs
-- `GET /api/data-sources` - List data sources
-- `POST /api/jobs` - Create analysis job
-- `GET /api/jobs` - List jobs
-- `GET /api/outputs` - List output files
-
-## Performance
-
-| Commits | Concurrency | Time (avg 2min/commit) |
-|---------|-------------|------------------------|
-| 100     | 1           | ~200 minutes (~3.3h)   |
-| 100     | 4           | ~50 minutes            |
-| 100     | 8           | ~25 minutes            |
-| 100     | 16          | ~13 minutes            |
-
-**Speedup: Up to 16x faster with parallel scanners!** 🚀
-
-## Resource Requirements
-
-| Concurrency | RAM   | CPU  | Disk    |
-|-------------|-------|------|---------|
-| 4           | 4GB   | 4    | 50GB    |
-| 8           | 8GB   | 8    | 100GB   |
-| 16          | 16GB  | 16   | 200GB   |
-
-## Configuration Options
-
-### Increase Concurrency
-
-```yaml
-# config/pipeline.yml
-pipeline:
-  sonar_parallelism: 16  # More parallel scanners
-```
-
-### Tune SonarQube Performance
-
-```yaml
-# docker-compose.yml
-sonarqube:
-  environment:
-    SONAR_CE_JAVAOPTS: "-Xmx8g -Xms4g"  # More memory
-    SONAR_WEB_JAVAADDITIONALOPTS: "-Dsonar.web.http.maxThreads=300"  # More threads
-```
-
-## Technology Stack
-
-- **FastAPI** - REST API framework
-- **Celery** - Distributed task queue  
-- **RabbitMQ** - Message broker
-- **MongoDB** - Job/metadata storage
-- **SonarQube** - Code quality analysis server
-- **PostgreSQL** - SonarQube metrics database
-- **Docker** - Containerization
-
-## Monitoring
+**3. Khởi động nhanh (docker compose)**
+1) Cập nhật token Sonar trong `config/pipeline.yml`.
+2) Khởi động core infra (SonarQube cần thời gian để khởi tạo DB và web):
 
 ```bash
-# Watch parallel scanners in action
-docker-compose logs -f worker | grep "Processing commit"
-
-# Monitor resource usage
-docker stats worker sonarqube
-
-# Check queue depth
-curl -u pipeline:pipeline http://localhost:15672/api/queues
+docker compose up -d mongo rabbitmq db sonarqube loki promtail grafana
+# chờ SonarQube khởi động (có thể mất vài phút)
+docker compose up -d api worker_ingest worker_scan worker_exports beat frontend
 ```
 
-## Troubleshooting
+**Cài Đặt — Hướng Dẫn Từng Bước (macOS / Linux)**
 
-### Workers idle, no scanning
+- **Bước 0 — Yêu cầu trước:**
+  - Docker & Docker Compose v2+ đã cài đặt và đang chạy.
+  - Git được cài đặt.
+  - (Tùy chọn) Nếu bạn dùng macOS hoặc Linux và muốn chạy build cục bộ, đảm bảo bạn có quyền chạy Docker.
+
+- **Bước 1 — Clone repo và chuyển vào thư mục dự án**
 
 ```bash
-# Check RabbitMQ connection
-docker-compose logs worker | grep -i connected
-
-# Restart worker
-docker-compose restart worker
+git clone https://github.com/<your-org>/build-commit-pipeline.git
+cd build-commit-pipeline
+git checkout -b my-local-setup
 ```
 
-### SonarQube out of memory
+- **Bước 2 — Chuẩn bị cấu hình**
+  - Mở file `config/pipeline.yml` (hoặc `config/pipeline.example.yml`) và sửa các trường sau:
+    - `paths.default_workdir`: đường dẫn nơi Sonar và worktrees sẽ được lưu (theo mặc định là `/app/data/sonar-work` trong container).
+    - `sonarqube.instances[0].host`: địa chỉ SonarQube (vd: `http://localhost:9001`).
+    - `sonarqube.instances[0].token`: đặt token truy cập cho API SonarQube (tạo token trong UI SonarQube — xem Bước 6).
+    - `sonarqube.webhook_secret`: một chuỗi bí mật cho webhook (ví dụ: `my-webhook-secret`).
+    - `sonarqube.webhook_public_url`: URL công khai mà Sonar sẽ gọi (vd `https://my.example.com/sonar/webhook`).
+
+  - Lưu file khi hoàn tất.
+
+- **Bước 3 — Tạo thư mục dữ liệu local và cấp quyền (nếu cần)**
 
 ```bash
-# Check memory usage
-docker stats sonarqube
-
-# Increase heap size in docker-compose.yml
-SONAR_CE_JAVAOPTS: "-Xmx8g -Xms4g"
+mkdir -p ./data/sonar-work ./data/uploads ./data/exports ./data/failed_commits ./data/promtail
+# (Tùy chọn) nếu cần thay đổi quyền để Docker có thể ghi
+sudo chown -R $USER:$(id -g -n) ./data
 ```
 
-### Disk space full
+- **Bước 4 — Build image backend (chứa `sonar-scanner`)**
+  - Image backend cần Java + SonarScanner được cài sẵn. Build image bằng lệnh:
 
 ```bash
-# Clean old worktrees
-docker-compose exec worker find /app/data/sonar-work -name worktrees -exec rm -rf {} +
+docker compose build backend
 ```
 
-## License
-
-MIT
-
-
-Pipeline thu thập & làm giàu TravisTorrent với FastAPI + Celery + RabbitMQ + MongoDB, tích hợp SonarQube webhook và giao diện Next.js để quản lý toàn bộ quy trình.
-
-## Kiến trúc tổng quan
-
-```
-frontend (Next.js)
-    └── gọi REST API để upload CSV, giám sát job, tải metrics
-backend (FastAPI)
-    ├── API đồng bộ (upload CSV, trigger job, liệt kê SonarQube runs, tải output)
-    ├── Celery worker xử lý ingestion + scan + export metrics
-    ├── RabbitMQ làm broker/queue + Dead Letter Queue (Mongo)
-    ├── MongoDB lưu metadata dataset, job queue, DLQ, đường dẫn output
-    └── Module `pipeline/sonar.py` tái hiện logic của `sonar_scan_csv_multi.py` để clone repo, checkout commit và chạy sonar-scanner
-SonarQube
-    └── Khởi chạy bằng docker-compose.sonarqube.yml (thư mục sonar-scan/) và cấu hình webhook → backend
-Observability
-    └── Grafana Loki + Promtail + Grafana theo dõi stdout containers và file log trong `data/`
-```
-
-## Thư mục quan trọng
-
-- `backend/` – FastAPI app (`app/main.py`), cấu hình Celery (`app/celery_app.py`), service layer (`app/services/*`), pipelines (`backend/pipeline/*`).
-- `frontend/` – Next.js 14 app cung cấp 4 màn hình: nguồn dữ liệu, job thu thập, SonarQube runs, output.
-- `config/pipeline.yml` – YAML cấu hình duy nhất cho kết nối Mongo/RabbitMQ, đường dẫn Sonar script, các metric keys muốn export.
-- `docker-compose.yml` – Khởi chạy API + worker + beat + frontend + RabbitMQ + Mongo. Mặc định mount thư mục `../sonar-scan` để tái sử dụng các script hiện có, đồng thời tạo hai database Postgres riêng cho từng SonarQube instance.
-- `config/postgres-init.sql` – Script khởi tạo `sonar_primary` và `sonar_secondary` để mỗi SonarQube dùng database riêng, tránh xung đột migration.
-- `data/` – Lưu file upload, dead-letter artifact, và CSV metrics sau khi export (được mount vào containers).
-
-## Quick start (chạy nhanh)
-
-Chạy toàn bộ stack bằng Docker (gồm API, worker, frontend, RabbitMQ, Mongo, SonarQube nếu bạn có cấu hình):
+- **Bước 5 — Khởi động các dịch vụ nền**
+  - Khởi MongoDB, RabbitMQ và SonarQube trước, chờ cho SonarQube sẵn sàng:
 
 ```bash
-cp .env.example .env                            # sau đó chỉnh APP_UID/APP_GID theo máy của bạn
-# hoặc một dòng: APP_UID=$(id -u) APP_GID=$(id -g) envsubst < .env.example > .env
-# chỉnh token SonarQube trong config/pipeline.yml trước khi khởi động
-docker compose up --build
+docker compose up -d mongo rabbitmq sonarqube
+# kiểm tra logs/health của SonarQube (chờ cho đến khi UI sẵn sàng ở :9001)
+docker compose logs -f sonarqube
 ```
 
-Chỉ chạy backend cục bộ (phát triển API):
+- **Bước 6 — Tạo token truy cập SonarQube (manual)**
+  - Đăng nhập vào SonarQube UI (vd `http://localhost:9001`).
+  - Vào **My Account → Security → Generate Tokens**.
+  - Tạo token mới (ví dụ tên `pipeline-token`) và copy token đó.
+  - Dán token vào `config/pipeline.yml` tại `sonarqube.instances[0].token`.
+
+- **Bước 7 — Tạo Webhook trong SonarQube (manual)**
+  - Vào **Administration → Configuration → Webhooks** trong SonarQube.
+  - Tạo webhook mới:
+    - `URL`: đặt là `http(s)://<your-public-host>/api/sonarqube/webhook` hoặc giá trị bạn cấu hình tại `sonarqube.webhook_public_url`.
+    - `Secret`: nhập chính xác `sonarqube.webhook_secret` từ `pipeline.yml`.
+  - Lưu webhook.
+
+- **Bước 8 — Khởi động API + workers**
+
+```bash
+docker compose up -d api worker_ingest worker_scan worker_exports beat frontend
+```
+
+- **Bước 9 — Kiểm tra hoạt động**
+  - Kiểm tra log của `worker_scan` để thấy lệnh `sonar-scanner` được chạy khi có job quét:
+
+```bash
+docker compose logs -f worker_scan
+```
+
+  - Để chạy một job thử nghiệm, tạo một commit mẫu hoặc gửi request qua API (tham khảo `README` phần API usage).
+
+- **Bước 10 — Điều chỉnh `SONAR_SCANNER_OPTS` (nếu cần)**
+  - Mặc định `worker_scan` nhận biến môi trường `SONAR_SCANNER_OPTS` để tinh chỉnh heap JVM cho `sonar-scanner`.
+  - Nếu máy host có nhiều RAM, tăng `-Xmx` ví dụ `-Xmx2g` trong `docker-compose.yml` cho `worker_scan`.
+
+Tips & Notes:
+ - Nếu bạn chạy trên môi trường CI hoặc muốn tách biệt, có thể cài đặt SonarScanner trên máy host thay vì trong image; chỉ cần đảm bảo `sonar-scanner` có thể được gọi từ worker.
+ - Nếu không muốn dùng SonarScanner binary trong image, có thể cấu hình worker để gọi SonarScanner container (yêu cầu mount socket và quyền), nhưng phương án này đã bị loại bỏ trong cấu hình hiện tại.
+
+
+3) Kiểm tra:
+- API: http://localhost:8000
+- Frontend: http://localhost:3000
+- SonarQube: http://localhost:9001
+- RabbitMQ UI: http://localhost:15672 (pipeline/pipeline)
+- Grafana (logs): http://localhost:3001 (admin/admin). Thêm Loki datasource trỏ `http://loki:3100` rồi chạy truy vấn `{service="worker_scan"}` để xem log.
+
+## Giám sát log với Loki + Grafana
+
+Repo đã bao gồm stack `loki` + `promtail` + `grafana` để gom log của toàn bộ container:
+
+1. Đảm bảo đã tạo thư mục lưu vị trí đọc log: `mkdir -p ./data/promtail` (đã liệt kê trong phần chuẩn bị dữ liệu).
+2. Khởi động stack log bất kỳ lúc nào:
+
+   ```bash
+   docker compose up -d loki promtail grafana
+   ```
+
+   Promtail tự động đọc stdout/stderr của mọi container thông qua socket Docker, vì vậy không cần cấu hình file log riêng.
+3. Mở Grafana tại http://localhost:3001, đăng nhập `admin/admin`, sau đó thêm Loki datasource trỏ `http://loki:3100`.
+4. Tạo dashboard mới và chạy truy vấn ví dụ `{service="api"}` hoặc `{service="worker_scan"}` để xem log realtime, thêm bộ lọc `compose_project="build-commit-pipeline"` nếu chạy nhiều project Docker cùng lúc.
+
+Khi triển khai trên server (EC2, bare-metal), thao tác hoàn toàn tương tự. Bạn có thể import các dashboard Grafana khác hoặc thiết lập alert dựa trên nguồn Loki này.
+
+## Triển khai Docker trên EC2 & lưu log Sonar lên S3
+
+> Các bước này mô tả cách chạy toàn bộ stack trên Amazon EC2, kết nối S3 để lưu log quét.
+
+### 1. Chuẩn bị máy EC2
+1. Tạo EC2 instance (Ubuntu 22.04 hoặc Amazon Linux 2). Khuyến nghị ít nhất `t3.xlarge` (4 vCPU / 16GB RAM) cho worker scan.
+2. Mở các port cần thiết: 22 (SSH), 80/443 (API/Frontend), 9001 (SonarQube nếu chạy chung), 5672/15672 (RabbitMQ nếu cần truy cập UI).
+3. Cài Docker & docker compose:
+   ```bash
+   sudo apt-get update -y
+   sudo apt-get install -y docker.io git
+   sudo usermod -aG docker $USER
+   newgrp docker
+   DOCKER_COMPOSE_VERSION=v2.24.7
+   sudo curl -SL https://github.com/docker/compose/releases/download/${DOCKER_COMPOSE_VERSION}/docker-compose-linux-x86_64 -o /usr/local/bin/docker-compose
+   sudo chmod +x /usr/local/bin/docker-compose
+   sudo systemctl enable --now docker
+   ```
+
+### 2. Clone repo & chuẩn bị thư mục dữ liệu
+```bash
+git clone https://github.com/<your-org>/build-commit-pipeline.git
+cd build-commit-pipeline
+mkdir -p ./data/sonar-work ./data/uploads ./data/exports ./data/failed_commits ./data/promtail
+```
+
+### 3. Cấu hình SonarQube
+1. **Tạo token**  
+   - Truy cập UI SonarQube (ví dụ `http://<ec2-ip>:9001`).  
+   - `Administration → Security → Users/Tokens → Generate Token`. Token này map vào `sonarqube.instances[].token`.
+2. **Tạo webhook**  
+   - `Administration → Configuration → Webhooks → Create`.  
+   - URL: `https://<domain-or-ip>/api/sonar/webhook`.  
+   - Secret: copy vào `sonarqube.webhook_secret`.  
+3. (Nếu chạy Sonar trong docker-compose) chỉnh `docker-compose.yml` để expose port 9001 và map volume `./data/sonarqube` nếu muốn giữ dữ liệu.
+
+### 4. Kết nối S3 để lưu log scan
+1. Tạo S3 bucket (ví dụ `build-commit-pipeline-logs`).  
+2. Tạo IAM user/role với quyền `s3:PutObject`, `s3:GetObject`, `s3:ListBucket` cho bucket.  
+3. Cập nhật phần `s3` trong `config/pipeline.yml`:
+   ```yaml
+   s3:
+     enabled: true
+     bucket_name: build-commit-pipeline-logs
+     region: ap-southeast-1
+     access_key_id: <AWS_ACCESS_KEY_ID>      # bỏ nếu dùng IAM role EC2
+     secret_access_key: <AWS_SECRET_ACCESS_KEY>
+     endpoint_url: null                     # giữ null trừ khi dùng MinIO
+     sonar_logs_prefix: sonar-logs
+     error_logs_prefix: error-logs
+   ```
+   Nếu EC2 có IAM role, bỏ `access_key_id` và `secret_access_key`.
+
+### 5. Chỉnh `config/pipeline.yml`
+- Sao chép `config/pipeline.example.yml` → `config/pipeline.yml`.  
+- Quan trọng:
+  - `mongo.uri`: nếu dùng MongoDB Atlas, cập nhật URI + user.  
+  - `broker.url`: RabbitMQ URI.  
+  - `sonarqube.instances`: host + token.  
+  - `paths.*`: giữ mặc định `/app/data/...` vì compose đã mount `./data`.  
+  - `web.base_url`: domain dùng cho frontend (để trong email/link nếu cần).
+
+### 6. Build & chạy docker trên EC2
+```bash
+docker compose build
+docker compose up -d mongo rabbitmq db sonarqube loki promtail grafana
+# chờ SonarQube khởi động
+docker compose up -d api worker_ingest worker_scan worker_exports beat frontend
+```
+
+### 7. Thiết lập HTTPS / Reverse proxy (khuyến nghị)
+- Dùng Nginx hoặc AWS Load Balancer đặt trước API/Frontend.  
+- Cấu hình route `/api` → container `api:8000`, `/` → `frontend:3000`.  
+- Bật HTTPS (Let’s Encrypt hoặc ACM).
+
+### 8. Kiểm tra sau triển khai
+1. `curl http://<ec2-ip>:8000/health` để sure API up.  
+2. Mở `http://<ec2-ip>:3000` để truy cập UI.  
+3. Upload một CSV nhỏ, trigger ingest.  
+4. Theo dõi log `docker compose logs -f worker_scan`.  
+5. Kiểm tra S3 bucket xem log `.txt` được đẩy vào đúng prefix.  
+6. Đăng nhập Grafana `http://<ec2-ip>:3001`, thêm Loki datasource `http://loki:3100` và xác nhận nhìn thấy log `{service="worker_scan"}`.
+
+### 9. Các lưu ý vận hành
+- **Celery beat**: container `beat` phải chạy để task `reconcile_scan_jobs` tự động requeue job kẹt.  
+- **Failed commits**: UI `/failed-commits` hiển thị job `FAILED_PERMANENT`. Dùng nút retry để cập nhật sonar.properties rồi enqueue lại.  
+- **Backup**: MongoDB chứa toàn bộ state; nên dùng Atlas hoặc replica set + backup định kỳ.  
+- **Scale**: tăng `worker_scan` và chỉnh `celery worker -c <n>` để nâng throughput.  
+- **Logs**: stack Loki+Promtail+Grafana đã gom toàn bộ stdout container; vẫn có thể mirror sang CloudWatch/ELK nếu cần lưu trữ lâu dài.
+
+**5) Chạy phát triển cục bộ (không Docker toàn bộ)**
+- Backend (sử dụng `uv` như repo đã cấu hình):
 
 ```bash
 cd backend
-curl -LsSf https://astral.sh/uv/install.sh | sh  # nếu chưa có uv
-uv sync --frozen --no-dev                        # tạo .venv theo lockfile
+curl -LsSf https://astral.sh/uv/install.sh | sh   # nếu chưa có uv
+uv sync --frozen --no-dev
 source .venv/bin/activate
 uv run uvicorn app.main:app --reload
-# chạy celery worker trong terminal khác
-uv run celery -A app.celery_app.celery_app worker -l info
-dokcer pull sonarsource/sonar-scanner-cli
+# worker
+uv run celery -A app.celery_app.celery_app worker -l info -Q pipeline.scan
 ```
 
-Frontend (cục bộ):
+- Frontend (local):
 
 ```bash
 cd frontend
@@ -217,198 +285,41 @@ npm install
 npm run dev
 ```
 
-## Troubleshooting
+**6) Những cấu hình/tập tin đã thay đổi trong repo**
+- `backend/app/core/config.py`: mặc định `sonar_instances_config` đã điểm tới `config/sonar_instances.example.json` (trong repo) — không cần mount `../sonar-scan` nữa.
+- `docker-compose.yml`: các mount `../sonar-scan:/app/sonar-scan:ro` đã bị loại bỏ để đơn giản hoá. Nếu bạn thực sự cần script ngoài repo, có thể add lại mount này.
 
-- SonarQube không gửi webhook: kiểm tra `sonarqube.webhook_secret` trong `config/pipeline.yml` và đảm bảo endpoint `http://<host>:8000/api/sonar/webhook` có thể truy cập từ SonarQube container.
-- Celery không thực thi task: kiểm tra broker (RabbitMQ) URL và rằng worker đang chạy (`uv run celery -A app.celery_app.celery_app worker -l info`).
-- Kết nối Mongo thất bại: kiểm tra chuỗi kết nối trong `config/pipeline.yml` và đảm bảo Mongo đã khởi động trước khi API kết nối.
-- SonarScanner không chạy: đảm bảo SonarScanner CLI có sẵn trên host/container và mỗi instance trong `config/pipeline.yml` có token hợp lệ.
+**7) Quyền truy cập Docker socket (nếu dùng)**
+- Host: `ls -l /var/run/docker.sock` sẽ cho biết owner:group (thường `root:docker`). GID nhóm docker trên host cần được phản ánh trong container nếu bạn chạy non-root.
+- Cách xử lý:
+  - Chạy container là root (đơn giản nhưng kém an toàn)
+  - Khi build image, tạo nhóm với cùng GID như host docker group và tạo user thuộc nhóm đó (phép so khớp GID để cho phép truy cập socket)
+  - Dùng `--group-add <docker-gid>` trong compose để thêm quyền nhóm cho container (tùy Docker/Compose phiên bản)
 
-## Chuẩn bị
-
-1. **Chạy SonarQube**: dùng `sonar-scan/docker-compose.sonarqube.yml` như bạn đã có để bật SonarQube và SonarScanner CLI.
-2. **Tạo `.env`**: sao chép `.env.example` thành `.env`, đặt `APP_UID` và `APP_GID` (thường là kết quả của `id -u` và `id -g`). Docker Compose sẽ chạy các service backend bằng UID/GID này để mọi file trong `./data` luôn thuộc sở hữu user hiện tại, không phải chạy `sudo chown` sau mỗi lần pull. Nếu trước đây thư mục `data/` đã bị root chiếm quyền, chỉ cần `sudo chown -R $(id -u):$(id -g) data` **một lần** để đồng bộ lại.
-3. **Điền config**:
-   - Sao chép `config/pipeline.example.yml` thành `config/pipeline.yml` (đã thực hiện với cấu hình mặc định). Cập nhật:
-     - `sonarqube.instances`: danh sách SonarQube bạn muốn dùng (mỗi entry cần `host` và `token`). Worker sẽ round-robin commit qua các instance này.
-     - `sonarqube.webhook_secret`: chuỗi bí mật để SonarQube gửi webhook.
-4. **Logging (tùy chọn)**: Nếu sử dụng Loki + Promtail + Grafana trong `docker-compose.yml`, giữ nguyên `config/promtail-config.yml` hoặc chỉnh lại đường log mong muốn.
-
-## Backend dùng uv
-
-Toàn bộ dependencies Python được quản lý bằng [uv](https://github.com/astral-sh/uv) (đã khóa trong `backend/uv.lock`). Làm việc cục bộ:
-
-```bash
-curl -LsSf https://astral.sh/uv/install.sh | sh  # nếu chưa có uv
-cd build-commit-pipeline/backend
-uv sync --frozen --no-dev                        # tạo .venv theo lockfile
-source .venv/bin/activate                        # hoặc dùng `uv run ...`
-uv run uvicorn app.main:app --reload
-uv run celery -A app.celery_app.celery_app worker -l info
-```
-
-Dockerfile backend cũng sử dụng `uv sync --frozen` nên build luôn bám sát `uv.lock`.
-
-## Chạy toàn bộ stack
-
-```bash
-cd build-commit-pipeline
-docker compose up --build
-```
-
-- API: <http://localhost:8000>
-- Frontend: <http://localhost:3000>
-- Mongo: mongodb://travis:travis@localhost:27017 (authSource=admin)
-- RabbitMQ: amqp://pipeline:pipeline@localhost:5672//
-
-## Quy trình sử dụng giao diện
-
-1. **Nguồn dữ liệu** (`/data-sources`)
-   - Upload file CSV (ví dụ từ `19314170/ruby_per_project_csv`). Backend tự động tóm tắt số build/commit, tạo record trong Mongo.
-   - Bấm "Thu thập dữ liệu" để queue job Celery (`ingest_data_source`). Các commit trong CSV sẽ được đưa vào hàng đợi và phân phối lần lượt cho từng SonarQube instance, mỗi instance chỉ chạy tối đa 1 commit (Community) tại một thời điểm.
-
-2. **Thu thập** (`/jobs`)
-   - Theo dõi trạng thái job (queued/running/succeeded/failed), số commit đã xử lý / tổng và commit đang chạy. Progress bar cập nhật mỗi 5 giây với dữ liệu realtime từ Mongo.
-
-3. **SonarQube runs** (`/sonar-runs`)
-   - Hiển thị từng commit đã submit lên SonarQube (component key = `{project}_{commit}`), trạng thái webhook, log file path và đường dẫn metrics sau khi export. Khi webhook báo thành công, Celery sẽ tự động gọi task `export_metrics` để trích xuất measures và lưu file CSV vào `data/exports`.
-
-4. **Dữ liệu đầu ra** (`/outputs`)
-   - Liệt kê các bộ metric đã được export. Có link tải nhanh `api/outputs/{id}/download`.
-
-## Scale nhiều SonarQube instance
-
-Trong `config/pipeline.yml`, bạn có thể khai báo nhiều instance:
+Ví dụ ngắn (docker-compose snippet):
 
 ```yaml
-sonarqube:
-  instances:
-    - name: primary
-      host: http://sonarqube1:9000
-      token: "token-primary"
-    - name: secondary
-      host: http://sonarqube2:9000
-      token: "token-secondary"
+  worker_scan:
+    build: ./backend
+    volumes:
+      - ./backend:/app
+      - ./config/pipeline.yml:/app/config/pipeline.yml:ro
+      - ./data:/app/data
+      - /var/run/docker.sock:/var/run/docker.sock   # cho phép dùng docker từ trong container
 ```
 
-Mỗi commit từ CSV sẽ được gán lần lượt cho từng instance. Thông tin `sonar_instance`, `sonar_host`, commit hiện tại và log file đều được hiển thị trên giao diện `/jobs` và `/sonar-runs` để dễ theo dõi realtime.
+Và trong `backend/Dockerfile` (ví dụ nhanh):
 
-Hệ thống hiện vận hành theo mô hình một SonarQube server thu nhận các phân tích, và nhiều sonar-scanner worker chạy song song để submit analyses. SonarQube (CE) xử lý một phân tích tại một thời điểm; khi sử dụng một server duy nhất, việc phân phối work được thực hiện bởi hàng đợi Celery và nhiều worker chạy đồng thời.
-- Docker Compose đã cấu hình sẵn hai database Postgres (`sonar_primary`, `sonar_secondary`) thông qua `config/postgres-init.sql`, vì vậy mỗi SonarQube container sử dụng schema riêng biệt và không tranh chấp migration. Nếu bạn đã chạy phiên bản cũ (một database), hãy xóa volume `postgres_data` trước khi khởi động lại để script có cơ hội tạo schema mới.
-
-## Observability (Grafana + Loki)
-
-- `docker-compose.yml` bổ sung 3 dịch vụ:
-  - `loki` (port 3100) lưu trữ log.
-  - `promtail` tail stdout của Docker (`/var/lib/docker/containers/*`) và các file log trong `data/` (như `sonar-work/*/logs/*.log`, `dead_letter/*.json`, `error_logs/*.log`) theo cấu hình `config/promtail-config.yml`.
-  - `grafana` (port 3001, admin/admin) để trực quan hóa.
-- Sau khi `docker compose up -d loki promtail grafana`, vào Grafana → add data source → Loki (`http://loki:3100`).
-- Các nhãn log quan trọng:
-  - `job="docker-containers"`: log stdout của API, Celery worker/beat, frontend, RabbitMQ, Mongo, SonarQube, v.v.
-  - `job="sonar-commit-logs"`: log từng commit (`data/sonar-work/<instance>/<project>/logs/*.log`).
-  - `job="dead-letter"`: JSON payload commit lỗi trong `data/dead_letter`.
-  - `job="pipeline-error-files"`: file `data/error_logs/*.log`.
-- Nếu muốn bổ sung đường log khác (ví dụ upload tiến độ), chỉnh `config/promtail-config.yml` và reload Promtail.
-
-## Hook SonarQube webhook
-
-1. Trong SonarQube → Administration → Configuration → Webhooks → Add:
-   - **URL**: `http://host-may-ban:8000/api/sonar/webhook`
-   - **Secret**: dùng giá trị `sonarqube.webhook_secret` trong YAML.
-2. Sau mỗi analysis thành công, SonarQube sẽ POST payload. Backend xác thực chữ ký (`X-Sonar-Webhook-HMAC-SHA256` hoặc `X-Sonar-Secret`). Nếu status = OK/SUCCESS, Celery `export_metrics` chạy ngay, ghi đường dẫn vào Mongo + outputs.
-
-## Dead Letter Queue
-
-- Khi Celery task thất bại (ví dụ Sonar scan lỗi), backend ghi lại payload vào collection `dead_letters` và trạng thái data source chuyển `failed`.
-- File log/chi tiết cũng có thể ghi ra `data/dead_letter/` nếu cần mở rộng (`LocalFileService`).
-
-## Tích hợp script hiện tại
-
-- **Scanning**: `pipeline/sonar.py` chuyển logic từ `sonar-scan/sonar_scan_csv_multi.py` vào Python module. Một SonarCommitRunner được tạo cho từng instance và CSV; runner clone repo, checkout từng commit tuần tự và chạy `sonar-scanner`.
-- **Metrics export**: `pipeline/sonar.py::MetricsExporter` lấy cảm hứng từ `sonar-scan/batch_fetch_all_measures.py`, nhưng gói gọn cho từng project key, chunk metric theo YAML.
-- Nếu muốn chạy hàng loạt, chỉ cần đặt nhiều file CSV trong thư mục `data/uploads/` rồi queue nhiều data source.
-
-## API chính (FastAPI)
-
-| Method | Path | Mô tả |
-|--------|------|-------|
-| `POST /api/data-sources?name=` | Upload CSV (multipart). Trả về metadata + stats. |
-| `POST /api/data-sources/{id}/collect` | Queue job Celery để scan + lấy metrics. |
-| `GET /api/jobs` | Danh sách job ingest với phân trang. |
-| `GET /api/jobs/workers-stats` | **MỚI**: Thống kê workers và tasks đang chạy realtime. |
-| `GET /api/sonar/runs` | Lịch sử webhook/scan. |
-| `POST /api/sonar/webhook` | Endpoint nhận webhook SonarQube. |
-| `GET /api/outputs` | Danh sách dataset enriched. |
-| `GET /api/outputs/{id}/download` | Tải file metrics CSV. |
-
-## Worker Monitoring (Tính năng mới) 🆕
-
-Hệ thống hiện hỗ trợ theo dõi workers realtime trên trang Jobs:
-
-### Thông tin hiển thị:
-- **Số Workers**: Tổng số Celery workers đang hoạt động
-- **Concurrency (max)**: Số task tối đa có thể chạy đồng thời
-- **Đang scan**: Số commits đang được scan ngay lúc này
-- **Đang chờ**: Số commits trong queue chờ xử lý
-
-### Chi tiết từng Worker:
-Mỗi worker hiển thị:
-- Tên worker (ví dụ: `celery@sonar-worker-1`)
-- Số tasks đang chạy / tối đa
-- Thông tin từng task đang chạy:
-  - Commit SHA (8 ký tự)
-  - Repository/Project key
-
-### Cấu hình Worker Concurrency:
-
-```yaml
-# config/pipeline.yml
-pipeline:
-  sonar_parallelism: 8  # Số workers/tasks chạy đồng thời
+```dockerfile
+RUN apt-get update && apt-get install -y docker.io
 ```
 
-**Ví dụ hiệu suất:**
-- `sonar_parallelism: 4` → 4 commits scan cùng lúc
-- `sonar_parallelism: 8` → 8 commits scan cùng lúc
-- `sonar_parallelism: 16` → 16 commits scan cùng lúc
+**8) Lời khuyên và bước tiếp theo**
+- Nếu bạn muốn tôi cập nhật repo để không cần Docker socket: tôi có thể chỉnh `backend/Dockerfile` để cài `sonar-scanner` binary và sửa `pipeline/sonar.py::build_scan_command` để chạy `sonar-scanner` trực tiếp (khuyến nghị).
+- Nếu bạn muốn dùng socket approach, tôi có thể cập nhật `docker-compose.yml` và `backend/Dockerfile` để cài Docker CLI và thêm hướng dẫn khớp GID của group `docker`.
 
-### API Endpoint Mới:
+Nếu bạn đồng ý, chọn một phương án (A: mount socket, B: cài `sonar-scanner` vào image). Tôi sẽ thực hiện các thay đổi cần thiết (Dockerfile + compose + code) và test nhỏ để đảm bảo worker có thể chạy scan.
 
-**GET /api/jobs/workers-stats**
+````
 
-Trả về thông tin realtime về workers:
-
-```json
-{
-  "total_workers": 2,
-  "max_concurrency": 8,
-  "active_scan_tasks": 5,
-  "queued_scan_tasks": 10,
-  "workers": [
-    {
-      "name": "celery@worker1",
-      "active_tasks": 3,
-      "max_concurrency": 8,
-      "tasks": [
-        {
-          "id": "task-uuid",
-          "name": "app.tasks.sonar.run_commit_scan",
-          "current_commit": "abc123def",
-          "current_repo": "owner/repo"
-        }
-      ]
-    }
-  ]
-}
-```
-
-### Tài liệu chi tiết:
-
-- [Hướng dẫn sử dụng (Tiếng Việt)](./docs/HUONG_DAN_SU_DUNG.md) - Hướng dẫn đầy đủ từ A-Z
-- [Worker Monitoring Documentation](./docs/WORKER_MONITORING.md) - Chi tiết kỹ thuật về worker monitoring
-
-## Mở rộng
-
-- Thêm `app/tasks/sonar.py` để hỗ trợ queue retry thủ công hoặc cron refresh.
-- Dễ dàng chuyển sang message broker khác (ví dụ đổi RabbitMQ host) bằng cách chỉnh `broker.url` trong YAML + Celery config.
-- Có thể thêm trang quản lý DLQ bằng cách đọc collection `dead_letters`.
+```bash

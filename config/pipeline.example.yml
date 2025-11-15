@@ -28,6 +28,7 @@ broker:
   default_queue: pipeline.default
 pipeline:
   ingestion_chunk_size: 2000
+  default_retry_limit: 3
 sonarqube:
   webhook_secret: change-me
   webhook_public_url: http://localhost:8000/api/sonar/webhook
@@ -109,11 +110,5 @@ sonarqube:
       - last_commit_date
     chunk_size: 25
     output_format: csv
-storage:
-  data_sources_collection: data_sources
-  jobs_collection: jobs
-  sonar_runs_collection: sonar_runs
-  dead_letter_collection: dead_letters
-  outputs_collection: outputs
 web:
   base_url: http://localhost:3000

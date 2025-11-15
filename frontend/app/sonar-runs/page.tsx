@@ -2,19 +2,18 @@
 
 import { ColumnDef } from "@tanstack/react-table";
 import { useEffect, useMemo, useState } from "react";
+import { JSONTree } from "react-json-tree";
 
-import { StatusBadge } from "@/components/StatusBadge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { DataTable } from "@/components/ui/data-table";
-import { Input } from "@/components/ui/input";
-import { api, SonarRun } from "@/lib/api";
+import { api, ScanResult } from "@/lib/api";
 
-export default function SonarRunsPage() {
-  const [runs, setRuns] = useState<SonarRun[]>([]);
+export default function ScanResultsPage() {
+  const [results, setResults] = useState<ScanResult[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [pageIndex, setPageIndex] = useState(0);
   const [total, setTotal] = useState(0);
-  
+
   const handleServerChange = async (params: {
     pageIndex: number;
     pageSize: number;
@@ -25,8 +24,14 @@ export default function SonarRunsPage() {
     try {
       const sortBy = params.sorting?.id;
       const sortDir = params.sorting?.desc ? "desc" : "asc";
-      const res = await api.listRunsPaginated(params.pageIndex + 1, params.pageSize, sortBy, sortDir, params.filters);
-      setRuns(res.items);
+      const res = await api.listScanResultsPaginated(
+        params.pageIndex + 1,
+        params.pageSize,
+        sortBy,
+        sortDir,
+        params.filters
+      );
+      setResults(res.items);
       setTotal(res.total || 0);
       setPageIndex(params.pageIndex);
     } catch (err: any) {
@@ -34,80 +39,63 @@ export default function SonarRunsPage() {
     }
   };
 
-  // Initial load
   useEffect(() => {
     handleServerChange({
       pageIndex: 0,
-      pageSize: 50,
+      pageSize: 25,
       sorting: null,
       filters: {},
-    }).catch((err) => setError(err.message));
+    }).catch(() => null);
   }, []);
 
-  const statusOptions = useMemo(() => Array.from(new Set(runs.map((item) => item.status))).sort(), [runs]);
-
-  const columns = useMemo<ColumnDef<SonarRun>[]>(() => {
+  const columns = useMemo<ColumnDef<ScanResult>[]>(() => {
     return [
       {
-        accessorKey: "project_key",
-        header: "Project key",
-        cell: ({ row }) => <span className="font-medium">{row.original.project_key}</span>,
-      },
-      {
-        accessorKey: "commit_sha",
-        header: "Commit",
-        cell: ({ row }) => <span className="font-mono text-xs">{row.original.commit_sha || "-"}</span>,
-      },
-      {
-        accessorKey: "component_key",
+        accessorKey: "sonar_project_key",
         header: "Component",
-        cell: ({ row }) => <span className="whitespace-nowrap">{row.original.component_key || "-"}</span>,
       },
       {
-        accessorKey: "sonar_instance",
-        header: "Instance",
-        cell: ({ row }) => row.original.sonar_instance || "-",
+        id: "metrics",
+        header: "Metrics",
+        cell: ({ row }) => {
+          const metrics = row.original.metrics || {};
+          return (
+            <div className="max-h-56 overflow-auto rounded-md border bg-slate-50 p-2 text-xs">
+              <JSONTree
+                data={metrics as Record<string, unknown>}
+                hideRoot
+                shouldExpandNodeInitially={(_, __, level) => level < 1}
+                theme={{
+                  base00: "#ffffff",
+                  base01: "#f5f5f5",
+                  base02: "#f0f0f0",
+                  base03: "#555555",
+                  base04: "#777777",
+                  base05: "#111111",
+                  base06: "#111111",
+                  base07: "#111111",
+                  base08: "#c92c2c",
+                  base09: "#1d7af2",
+                  base0A: "#f7b731",
+                  base0B: "#1b7c3c",
+                  base0C: "#0aa0d2",
+                  base0D: "#2e6fd1",
+                  base0E: "#8e44ad",
+                  base0F: "#ad6800",
+                }}
+              />
+            </div>
+          );
+        },
       },
       {
-        accessorKey: "sonar_host",
-        header: "Host",
-        cell: ({ row }) => <span className="whitespace-nowrap">{row.original.sonar_host || "-"}</span>,
-      },
-      {
-        accessorKey: "analysis_id",
-        header: "Analysis ID",
-        cell: ({ row }) => <span className="font-mono text-xs">{row.original.analysis_id || "-"}</span>,
-      },
-      {
-        accessorKey: "status",
-        header: "Trạng thái",
-        cell: ({ row }) => <StatusBadge value={row.original.status} />,
-      },
-      {
-        accessorKey: "started_at",
-        header: "Bắt đầu",
+        accessorKey: "created_at",
+        header: "Thời gian",
         cell: ({ row }) => (
-          <span className="whitespace-nowrap text-xs">{new Date(row.original.started_at).toLocaleString()}</span>
-        ),
-      },
-      {
-        accessorKey: "finished_at",
-        header: "Kết thúc",
-        cell: ({ row }) => (
-          <span className="whitespace-nowrap text-xs">
-            {row.original.finished_at ? new Date(row.original.finished_at).toLocaleString() : "-"}
+          <span className="text-xs">
+            {new Date(row.original.created_at).toLocaleString()}
           </span>
         ),
-      },
-      {
-        accessorKey: "metrics_path",
-        header: "Metrics",
-        cell: ({ row }) => <span className="max-w-[200px] truncate text-xs">{row.original.metrics_path || "-"}</span>,
-      },
-      {
-        accessorKey: "log_path",
-        header: "Log",
-        cell: ({ row }) => <span className="max-w-[200px] truncate text-xs">{row.original.log_path || "-"}</span>,
       },
     ];
   }, []);
@@ -116,42 +104,20 @@ export default function SonarRunsPage() {
     <section>
       <Card>
         <CardHeader>
-          <CardTitle className="text-xl">Lịch sử quét SonarQube</CardTitle>
+          <CardTitle className="text-xl">Scan results</CardTitle>
         </CardHeader>
         <CardContent>
-          {error && <p className="mb-4 text-sm text-destructive">{error}</p>}
+          {error && <p className="mb-4 text-sm text-red-600">{error}</p>}
           <DataTable
-            pageSize={50}
             columns={columns}
-            data={runs}
-            serverPagination={{ pageIndex, pageSize: 50, total, onPageChange: (next) => setPageIndex(next) }}
+            data={results}
+            serverPagination={{
+              pageIndex,
+              pageSize: 25,
+              total,
+              onPageChange: (next) => setPageIndex(next),
+            }}
             serverOnChange={handleServerChange}
-            emptyMessage="Chưa có Sonar run nào."
-            renderToolbar={(table) => (
-              <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-                <Input
-                  className="md:max-w-xs"
-                  placeholder="Lọc theo project..."
-                  value={(table.getColumn("project_key")?.getFilterValue() as string) ?? ""}
-                  onChange={(event) => table.getColumn("project_key")?.setFilterValue(event.target.value)}
-                />
-                <div className="flex items-center gap-2">
-                  <span className="text-sm text-muted-foreground">Trạng thái</span>
-                  <select
-                    className="h-10 rounded-md border border-input bg-background px-3 text-sm"
-                    value={(table.getColumn("status")?.getFilterValue() as string) ?? ""}
-                    onChange={(event) => table.getColumn("status")?.setFilterValue(event.target.value || undefined)}
-                  >
-                    <option value="">Tất cả</option>
-                    {statusOptions.map((status) => (
-                      <option key={status} value={status}>
-                        {status}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-            )}
           />
         </CardContent>
       </Card>
