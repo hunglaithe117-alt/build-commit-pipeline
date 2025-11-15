@@ -5,6 +5,7 @@ from typing import Any, Dict, List, Optional
 
 from pymongo import ReturnDocument
 from bson import ObjectId
+from app.models import ProjectStatus
 
 from app.services.repository_base import MongoRepositoryBase
 
@@ -31,7 +32,7 @@ class ProjectsRepository(MongoRepositoryBase):
             "total_commits": str(total_commits),
             "processed_commits": 0,
             "failed_commits": 0,
-            "status": "pending",
+            "status": ProjectStatus.pending.value,
             "source_filename": source_filename,
             "source_path": source_path,
             "created_at": now,
