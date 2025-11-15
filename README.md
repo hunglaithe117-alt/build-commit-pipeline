@@ -70,7 +70,7 @@ Nếu bạn cần lại phương án container trong tương lai, tôi có thể
 2) Khởi động core infra (SonarQube cần thời gian để khởi tạo DB và web):
 
 ```bash
-docker compose up -d mongo rabbitmq db sonarqube
+docker compose up -d mongo rabbitmq db sonarqube loki promtail grafana
 # chờ SonarQube khởi động (có thể mất vài phút)
 docker compose up -d api worker_ingest worker_scan worker_exports beat frontend
 ```
@@ -103,7 +103,7 @@ git checkout -b my-local-setup
 - **Bước 3 — Tạo thư mục dữ liệu local và cấp quyền (nếu cần)**
 
 ```bash
-mkdir -p ./data/sonar-work ./data/uploads ./data/exports ./data/failed_commits
+mkdir -p ./data/sonar-work ./data/uploads ./data/exports ./data/failed_commits ./data/promtail
 # (Tùy chọn) nếu cần thay đổi quyền để Docker có thể ghi
 sudo chown -R $USER:$(id -g -n) ./data
 ```
@@ -166,6 +166,24 @@ Tips & Notes:
 - Frontend: http://localhost:3000
 - SonarQube: http://localhost:9001
 - RabbitMQ UI: http://localhost:15672 (pipeline/pipeline)
+- Grafana (logs): http://localhost:3001 (admin/admin). Thêm Loki datasource trỏ `http://loki:3100` rồi chạy truy vấn `{service="worker_scan"}` để xem log.
+
+## Giám sát log với Loki + Grafana
+
+Repo đã bao gồm stack `loki` + `promtail` + `grafana` để gom log của toàn bộ container:
+
+1. Đảm bảo đã tạo thư mục lưu vị trí đọc log: `mkdir -p ./data/promtail` (đã liệt kê trong phần chuẩn bị dữ liệu).
+2. Khởi động stack log bất kỳ lúc nào:
+
+   ```bash
+   docker compose up -d loki promtail grafana
+   ```
+
+   Promtail tự động đọc stdout/stderr của mọi container thông qua socket Docker, vì vậy không cần cấu hình file log riêng.
+3. Mở Grafana tại http://localhost:3001, đăng nhập `admin/admin`, sau đó thêm Loki datasource trỏ `http://loki:3100`.
+4. Tạo dashboard mới và chạy truy vấn ví dụ `{service="api"}` hoặc `{service="worker_scan"}` để xem log realtime, thêm bộ lọc `compose_project="build-commit-pipeline"` nếu chạy nhiều project Docker cùng lúc.
+
+Khi triển khai trên server (EC2, bare-metal), thao tác hoàn toàn tương tự. Bạn có thể import các dashboard Grafana khác hoặc thiết lập alert dựa trên nguồn Loki này.
 
 ## Triển khai Docker trên EC2 & lưu log Sonar lên S3
 
@@ -190,7 +208,7 @@ Tips & Notes:
 ```bash
 git clone https://github.com/<your-org>/build-commit-pipeline.git
 cd build-commit-pipeline
-mkdir -p ./data/sonar-work ./data/uploads ./data/exports ./data/failed_commits
+mkdir -p ./data/sonar-work ./data/uploads ./data/exports ./data/failed_commits ./data/promtail
 ```
 
 ### 3. Cấu hình SonarQube
@@ -232,7 +250,7 @@ mkdir -p ./data/sonar-work ./data/uploads ./data/exports ./data/failed_commits
 ### 6. Build & chạy docker trên EC2
 ```bash
 docker compose build
-docker compose up -d mongo rabbitmq db sonarqube
+docker compose up -d mongo rabbitmq db sonarqube loki promtail grafana
 # chờ SonarQube khởi động
 docker compose up -d api worker_ingest worker_scan worker_exports beat frontend
 ```
@@ -247,14 +265,15 @@ docker compose up -d api worker_ingest worker_scan worker_exports beat frontend
 2. Mở `http://<ec2-ip>:3000` để truy cập UI.  
 3. Upload một CSV nhỏ, trigger ingest.  
 4. Theo dõi log `docker compose logs -f worker_scan`.  
-5. Kiểm tra S3 bucket xem log `.txt` được đẩy vào đúng prefix.
+5. Kiểm tra S3 bucket xem log `.txt` được đẩy vào đúng prefix.  
+6. Đăng nhập Grafana `http://<ec2-ip>:3001`, thêm Loki datasource `http://loki:3100` và xác nhận nhìn thấy log `{service="worker_scan"}`.
 
 ### 9. Các lưu ý vận hành
 - **Celery beat**: container `beat` phải chạy để task `reconcile_scan_jobs` tự động requeue job kẹt.  
 - **Failed commits**: UI `/failed-commits` hiển thị job `FAILED_PERMANENT`. Dùng nút retry để cập nhật sonar.properties rồi enqueue lại.  
 - **Backup**: MongoDB chứa toàn bộ state; nên dùng Atlas hoặc replica set + backup định kỳ.  
 - **Scale**: tăng `worker_scan` và chỉnh `celery worker -c <n>` để nâng throughput.  
-- **Logs**: ngoài S3, nên forward stdout container về CloudWatch/ELK để dễ điều tra.
+- **Logs**: stack Loki+Promtail+Grafana đã gom toàn bộ stdout container; vẫn có thể mirror sang CloudWatch/ELK nếu cần lưu trữ lâu dài.
 
 **5) Chạy phát triển cục bộ (không Docker toàn bộ)**
 - Backend (sử dụng `uv` như repo đã cấu hình):
