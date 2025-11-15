@@ -148,11 +148,23 @@ async def download_project_results(project_id: str) -> StreamingResponse:
     if not results:
         raise HTTPException(status_code=404, detail="No scan results for project")
 
+    def _component_parts(
+        component_key: Optional[str],
+    ) -> tuple[Optional[str], Optional[str]]:
+        if not component_key:
+            return None, None
+        if "_" not in component_key:
+            return component_key, None
+        repo_part, commit_part = component_key.rsplit("_", 1)
+        repo_slug = repo_part.replace("_", "/")
+        return repo_slug, commit_part
+
     metric_keys = sorted(
         {key for item in results for key in (item.get("metrics") or {}).keys()}
     )
     headers = [
-        "sonar_project_key",
+        "repo_name",
+        "commit",
         "job_id",
         "created_at",
         *metric_keys,
@@ -168,8 +180,10 @@ async def download_project_results(project_id: str) -> StreamingResponse:
 
         for item in results:
             metrics = item.get("metrics") or {}
+            repo_slug, commit_sha = _component_parts(item.get("sonar_project_key"))
             row = [
-                item.get("sonar_project_key"),
+                repo_slug,
+                commit_sha,
                 item.get("job_id"),
                 (
                     item.get("created_at").isoformat()
