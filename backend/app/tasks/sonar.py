@@ -149,7 +149,6 @@ def run_scan_job(self, scan_job_id: str) -> str:
     repository.update_scan_job(
         job["id"],
         sonar_instance=runner.instance.name,
-        status=ScanJobStatus.running.value,
     )
 
     override_text = job.get("config_override")

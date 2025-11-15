@@ -5,7 +5,7 @@ from typing import Any, Dict, List, Optional
 
 from bson import ObjectId
 from pymongo import ReturnDocument
-
+from app.models import ScanJobStatus
 from app.services.repository_base import MongoRepositoryBase
 
 _UNSET = object()
@@ -59,12 +59,14 @@ class ScanJobsRepository(MongoRepositoryBase):
     def claim_job(self, job_id: str, worker_id: str) -> Optional[Dict[str, Any]]:
         query: Dict[str, Any] = {
             "_id": ObjectId(job_id),
-            "status": {"$in": ["PENDING", "FAILED_TEMP"]},
+            "status": {
+                "$in": [ScanJobStatus.pending.value, ScanJobStatus.failed_temp.value]
+            },
         }
         now = datetime.utcnow()
         update_doc = {
             "$set": {
-                "status": "RUNNING",
+                "status": ScanJobStatus.running.value,
                 "last_worker_id": worker_id,
                 "last_started_at": now,
                 "updated_at": now,
