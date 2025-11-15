@@ -4,6 +4,20 @@ export type SonarConfig = {
   updated_at?: string;
 };
 
+export enum ProjectStatus {
+  PENDING = "PENDING",
+  PROCESSING = "PROCESSING",
+  FINISHED = "FINISHED",
+}
+
+export enum ScanJobStatus {
+  PENDING = "PENDING",
+  RUNNING = "RUNNING",
+  SUCCESS = "SUCCESS",
+  FAILED_TEMP = "FAILED_TEMP",
+  FAILED_PERMANENT = "FAILED_PERMANENT",
+}
+
 export type Project = {
   id: string;
   project_name: string;
@@ -12,7 +26,7 @@ export type Project = {
   total_commits: string;
   processed_commits: number;
   failed_commits: number;
-  status: string;
+  status: ProjectStatus;
   source_filename?: string | null;
   source_path?: string | null;
   created_at: string;
@@ -25,7 +39,7 @@ export type ScanJob = {
   project_id: string;
   project_key?: string | null;
   commit_sha: string;
-  status: string;
+  status: ScanJobStatus;
   retry_count: number;
   max_retries: number;
   last_error?: string | null;

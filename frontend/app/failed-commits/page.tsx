@@ -9,7 +9,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { DataTable } from "@/components/ui/data-table";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { api, ScanJob } from "@/lib/api";
+import { api, ScanJob, ScanJobStatus } from "@/lib/api";
 
 export default function FailedCommitsPage() {
   const [jobs, setJobs] = useState<ScanJob[]>([]);
@@ -34,7 +34,7 @@ export default function FailedCommitsPage() {
         const sortDir = params.sorting?.desc ? "desc" : "asc";
         const filters = {
           ...(params.filters || {}),
-          status: "FAILED_PERMANENT",
+          status: ScanJobStatus.FAILED_PERMANENT,
         };
         const res = await api.listScanJobsPaginated(
           params.pageIndex + 1,

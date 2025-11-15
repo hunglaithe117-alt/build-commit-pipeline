@@ -11,7 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { api, Project, TriggerCollectionResult } from "@/lib/api";
+import { api, Project, TriggerCollectionResult, ProjectStatus } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 export default function ProjectsPage() {
@@ -196,13 +196,13 @@ export default function ProjectsPage() {
             <Button
               size="sm"
               variant="outline"
-              disabled={
-                !(
-                  row.original.status === "pending" ||
-                  (row.original.status === "finished" &&
-                    (row.original.failed_commits ?? 0) > 0)
-                )
-              }
+                disabled={
+                  !(
+                    row.original.status === ProjectStatus.PENDING ||
+                    (row.original.status === ProjectStatus.FINISHED &&
+                      (row.original.failed_commits ?? 0) > 0)
+                  )
+                }
               onClick={() => triggerJob(row.original.id)}
             >
               Thu thập
