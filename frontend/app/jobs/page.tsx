@@ -16,6 +16,7 @@ export default function ScanJobsPage() {
   const [pageIndex, setPageIndex] = useState(0);
   const [total, setTotal] = useState(0);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [isJobsLoading, setIsJobsLoading] = useState(false);
 
   const loadPage = async (params: {
     pageIndex: number;
@@ -24,6 +25,7 @@ export default function ScanJobsPage() {
     filters: Record<string, any>;
   }) => {
     setError(null);
+    setIsJobsLoading(true);
     try {
       const sortBy = params.sorting?.id;
       const sortDir = params.sorting?.desc ? "desc" : "asc";
@@ -39,6 +41,8 @@ export default function ScanJobsPage() {
       setPageIndex(params.pageIndex);
     } catch (err: any) {
       setError(err.message);
+    } finally {
+      setIsJobsLoading(false);
     }
   };
 
@@ -156,6 +160,7 @@ export default function ScanJobsPage() {
           <DataTable
             columns={columns}
             data={jobs}
+            isLoading={isJobsLoading}
             serverPagination={{
               pageIndex,
               pageSize: 20,

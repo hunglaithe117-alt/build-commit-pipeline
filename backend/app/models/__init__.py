@@ -6,7 +6,6 @@ from .schemas import (
     ProjectStatus,
     ScanJob,
     ScanJobStatus,
-    ScanMetrics,
     ScanResult,
     SonarConfig,
 )
@@ -17,7 +16,6 @@ __all__ = [
     "ProjectStatus",
     "ScanJob",
     "ScanJobStatus",
-    "ScanMetrics",
     "ScanResult",
     "SonarConfig",
 ]

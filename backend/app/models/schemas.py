@@ -67,23 +67,12 @@ class ScanJob(BaseModel):
     config_source: Optional[str] = None
 
 
-class ScanMetrics(BaseModel):
-    bugs: int = 0
-    vulnerabilities: int = 0
-    code_smells: int = 0
-    coverage: float = 0.0
-    duplicated_lines_density: float = 0.0
-
-    class Config:
-        extra = "allow"
-
-
 class ScanResult(BaseModel):
     id: str
     project_id: str
     job_id: str
     sonar_project_key: str
-    metrics: ScanMetrics | Dict[str, float | int | str]
+    metrics: Dict[str, float | int | str]
     created_at: datetime
 
 
