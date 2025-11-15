@@ -31,8 +31,8 @@ class Project(BaseModel):
     id: str
     project_name: str
     project_key: str
-    total_builds: str
-    total_commits: str
+    total_builds: int
+    total_commits: int
     processed_commits: int = 0
     failed_commits: int = 0
     sonar_config: Optional[SonarConfig] = None

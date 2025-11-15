@@ -6,6 +6,7 @@ import { useEffect, useMemo, useState } from "react";
 import { StatusBadge } from "@/components/StatusBadge";
 import { DataTable } from "@/components/ui/data-table";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 import { api, ScanJob, WorkersStats } from "@/lib/api";
 
 export default function ScanJobsPage() {
@@ -49,6 +50,11 @@ export default function ScanJobsPage() {
     }
   };
 
+  const handleManualRefresh = () => {
+    loadPage({ pageIndex, pageSize: 20, sorting: null, filters: {} }).catch(() => null);
+    refreshWorkers();
+  };
+
   useEffect(() => {
     loadPage({ pageIndex: 0, pageSize: 20, sorting: null, filters: {} }).catch(() => null);
     refreshWorkers();
@@ -56,11 +62,10 @@ export default function ScanJobsPage() {
 
   useEffect(() => {
     const interval = setInterval(() => {
-      loadPage({ pageIndex, pageSize: 20, sorting: null, filters: {} }).catch(() => null);
       refreshWorkers();
     }, 5000);
     return () => clearInterval(interval);
-  }, [pageIndex]);
+  }, []);
 
   const columns = useMemo<ColumnDef<ScanJob>[]>(() => {
     return [
@@ -133,8 +138,11 @@ export default function ScanJobsPage() {
       {error && <p className="text-sm text-red-600">{error}</p>}
 
       <Card>
-        <CardHeader>
+        <CardHeader className="flex flex-row items-center justify-between">
           <CardTitle className="text-xl">Scan jobs</CardTitle>
+          <Button variant="outline" size="sm" onClick={handleManualRefresh}>
+            Refresh
+          </Button>
         </CardHeader>
         <CardContent>
           <DataTable

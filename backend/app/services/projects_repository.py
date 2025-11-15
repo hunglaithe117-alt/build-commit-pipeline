@@ -28,8 +28,9 @@ class ProjectsRepository(MongoRepositoryBase):
         payload = {
             "project_name": project_name,
             "project_key": project_key,
-            "total_builds": str(total_builds),
-            "total_commits": str(total_commits),
+            # store numeric totals as integers in the DB
+            "total_builds": int(total_builds or 0),
+            "total_commits": int(total_commits or 0),
             "processed_commits": 0,
             "failed_commits": 0,
             "status": ProjectStatus.pending.value,
@@ -117,9 +118,9 @@ class ProjectsRepository(MongoRepositoryBase):
         if sonar_config is not _UNSET:
             updates["sonar_config"] = sonar_config
         if total_builds is not _UNSET:
-            updates["total_builds"] = str(total_builds)
+            updates["total_builds"] = int(total_builds or 0)
         if total_commits is not _UNSET:
-            updates["total_commits"] = str(total_commits)
+            updates["total_commits"] = int(total_commits or 0)
 
         inc: Dict[str, Any] = {}
         if processed_delta:

@@ -22,8 +22,8 @@ export type Project = {
   id: string;
   project_name: string;
   project_key: string;
-  total_builds: string;
-  total_commits: string;
+  total_builds: number;
+  total_commits: number;
   processed_commits: number;
   failed_commits: number;
   status: ProjectStatus;
