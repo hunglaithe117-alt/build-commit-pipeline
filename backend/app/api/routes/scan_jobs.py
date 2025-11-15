@@ -39,7 +39,10 @@ async def list_scan_jobs(
         sort_dir,
         parsed_filters,
     )
-    return {"items": [ScanJob(**job) for job in result["items"]], "total": result["total"]}
+    return {
+        "items": [ScanJob(**job) for job in result["items"]],
+        "total": result["total"],
+    }
 
 
 @router.post("/{job_id}/retry", response_model=ScanJob)
@@ -125,8 +128,7 @@ async def get_workers_stats() -> dict:
             except Exception:
                 return 0
 
-        # Sum concurrency for workers that listen on pipeline.scan. If active_queues
-        # information isn't available, fall back to summing all workers.
+        # Sum concurrency for workers that listen on pipeline.scan only.
         scan_queue_name = "pipeline.scan"
         scan_worker_concurrency: dict = {}
         for worker_name, wstats in stats.items():
@@ -137,25 +139,20 @@ async def get_workers_stats() -> dict:
             except Exception:
                 queues = []
 
-            concurrency = _extract_concurrency(wstats)
-            if queues:
-                if scan_queue_name in queues:
-                    max_concurrency += concurrency
-                    scan_worker_concurrency[worker_name] = concurrency
-            else:
-                # No queue info: include the worker conservatively
-                max_concurrency += concurrency
-                scan_worker_concurrency[worker_name] = concurrency
+            if scan_queue_name not in queues:
+                continue
 
-        total_workers = (
-            len(scan_worker_concurrency) if scan_worker_concurrency else len(stats)
-        )
+            concurrency = _extract_concurrency(wstats)
+            max_concurrency += concurrency
+            scan_worker_concurrency[worker_name] = concurrency
+
+        total_workers = len(scan_worker_concurrency)
 
         # Process active tasks to get worker details (only include scan workers)
         workers = []
         for worker_name, tasks in active_tasks.items():
             # Only include workers that are consuming pipeline.scan
-            if scan_worker_concurrency and worker_name not in scan_worker_concurrency:
+            if worker_name not in scan_worker_concurrency:
                 continue
             worker_max = scan_worker_concurrency.get(worker_name, 0) or 0
             worker_info = {
