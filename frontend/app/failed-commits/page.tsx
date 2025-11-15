@@ -47,7 +47,9 @@ export default function FailedCommitsPage() {
         setTotal(res.total || 0);
         setPageIndex(params.pageIndex);
         if (selectedIdRef.current) {
-          const match = res.items.find((item) => item.id === selectedIdRef.current);
+          const match = res.items.find(
+            (item) => item.id === selectedIdRef.current
+          );
           if (match) {
             setSelected(match);
             setConfigDraft(match.config_override || "");
@@ -61,7 +63,9 @@ export default function FailedCommitsPage() {
   );
 
   useEffect(() => {
-    loadPage({ pageIndex: 0, pageSize: 20, sorting: null, filters: {} }).catch(() => null);
+    loadPage({ pageIndex: 0, pageSize: 20, sorting: null, filters: {} }).catch(
+      () => null
+    );
   }, [loadPage]);
 
   useEffect(() => {
@@ -94,7 +98,9 @@ export default function FailedCommitsPage() {
     try {
       await api.retryScanJob(selected.id, {
         config_override: configDraft || undefined,
-        config_source: configDraft ? "text" : selected.config_source,
+        config_source: configDraft
+          ? "text"
+          : selected.config_source ?? undefined,
       });
       setMessage("Đã gửi lại commit.");
       setSelected(null);
@@ -109,28 +115,44 @@ export default function FailedCommitsPage() {
       {
         accessorKey: "project_key",
         header: "Project",
-        cell: ({ row }) => <span className="font-medium">{row.original.project_key || "-"}</span>,
+        cell: ({ row }) => (
+          <span className="font-medium">{row.original.project_key || "-"}</span>
+        ),
       },
       {
         accessorKey: "commit_sha",
         header: "Commit",
-        cell: ({ row }) => <span className="font-mono text-xs">{row.original.commit_sha}</span>,
+        cell: ({ row }) => (
+          <span className="font-mono text-xs">{row.original.commit_sha}</span>
+        ),
       },
       {
         accessorKey: "last_error",
         header: "Lỗi",
-        cell: ({ row }) => <span className="text-xs text-red-600">{row.original.last_error || "-"}</span>,
+        cell: ({ row }) => (
+          <span className="text-xs text-red-600">
+            {row.original.last_error || "-"}
+          </span>
+        ),
       },
       {
         accessorKey: "updated_at",
         header: "Cập nhật",
-        cell: ({ row }) => <span className="text-xs">{new Date(row.original.updated_at).toLocaleString()}</span>,
+        cell: ({ row }) => (
+          <span className="text-xs">
+            {new Date(row.original.updated_at).toLocaleString()}
+          </span>
+        ),
       },
       {
         id: "actions",
         header: "",
         cell: ({ row }) => (
-          <Button variant="ghost" size="sm" onClick={() => handleSelect(row.original)}>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => handleSelect(row.original)}
+          >
             Chọn
           </Button>
         ),
@@ -160,12 +182,18 @@ export default function FailedCommitsPage() {
                 <Input
                   placeholder="Lọc theo project"
                   className="md:w-60"
-                  value={(table.getColumn("project_key")?.getFilterValue() as string) ?? ""}
-                  onChange={(event) => table.getColumn("project_key")?.setFilterValue(event.target.value)}
+                  value={
+                    (table
+                      .getColumn("project_key")
+                      ?.getFilterValue() as string) ?? ""
+                  }
+                  onChange={(event) =>
+                    table
+                      .getColumn("project_key")
+                      ?.setFilterValue(event.target.value)
+                  }
                 />
-                <span className="text-sm text-muted-foreground">
-                  Đang hiển thị các commit FAILED_PERMANENT
-                </span>
+                <span className="text-sm text-muted-foreground"></span>
               </div>
             )}
           />
@@ -182,15 +210,20 @@ export default function FailedCommitsPage() {
             <div className="space-y-4">
               <div className="rounded-md border p-3 text-sm space-y-1">
                 <p>
-                  <span className="text-muted-foreground">Project:</span> {selected.project_key || "-"}
+                  <span className="text-muted-foreground">Project:</span>{" "}
+                  {selected.project_key || "-"}
                 </p>
                 <p>
-                  <span className="text-muted-foreground">Commit:</span> {selected.commit_sha}
+                  <span className="text-muted-foreground">Commit:</span>{" "}
+                  {selected.commit_sha}
                 </p>
                 <p>
-                  <span className="text-muted-foreground">Lỗi:</span> {selected.last_error || "-"}
+                  <span className="text-muted-foreground">Lỗi:</span>{" "}
+                  {selected.last_error || "-"}
                 </p>
-                <p className="text-muted-foreground">Status: <StatusBadge value={selected.status} /></p>
+                <p className="text-muted-foreground">
+                  Status: <StatusBadge value={selected.status} />
+                </p>
               </div>
               <Textarea
                 rows={8}
@@ -204,16 +237,23 @@ export default function FailedCommitsPage() {
                   type="file"
                   accept=".properties,.txt"
                   className="hidden"
-                  onChange={(event) => handleImportFile(event.target.files?.[0] || null)}
+                  onChange={(event) =>
+                    handleImportFile(event.target.files?.[0] || null)
+                  }
                 />
-                <Button variant="outline" onClick={() => fileInputRef.current?.click()}>
+                <Button
+                  variant="outline"
+                  onClick={() => fileInputRef.current?.click()}
+                >
                   Tải nội dung từ file
                 </Button>
                 <Button onClick={handleRetry}>Retry commit</Button>
               </div>
             </div>
           ) : (
-            <p className="text-sm text-muted-foreground">Chọn commit ở bảng bên trái để chỉnh cấu hình và chạy lại.</p>
+            <p className="text-sm text-muted-foreground">
+              Chọn commit ở bảng bên trái để chỉnh cấu hình và chạy lại.
+            </p>
           )}
         </CardContent>
       </Card>

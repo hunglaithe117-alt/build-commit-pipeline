@@ -193,7 +193,7 @@ def run_scan_job(self, scan_job_id: str) -> str:
     return result.component_key
 
 
-@celery_app.task(bind=True, autoretry_for=(Exception,), max_retries=5)
+@celery_app.task(bind=True, autoretry_for=(Exception,))
 def export_metrics(
     self,
     component_key: str,

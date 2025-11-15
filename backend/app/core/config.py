@@ -31,9 +31,7 @@ class BrokerSettings(BaseModel):
 
 class PipelineTuning(BaseModel):
     ingestion_chunk_size: int = Field(default=2000)
-    sonar_parallelism: int = Field(default=8)
-    resume_failed_commits: bool = Field(default=True)
-    default_retry_limit: int = Field(default=5)
+    default_retry_limit: int = Field(default=3)
     csv_encoding: str = Field(default="utf-8")
 
 

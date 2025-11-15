@@ -21,7 +21,7 @@ ENV SONAR_SCANNER_VERSION=7.3.0.5189
 RUN mkdir -p /opt && \
     curl -fsSL "https://binaries.sonarsource.com/Distribution/sonar-scanner-cli/sonar-scanner-cli-${SONAR_SCANNER_VERSION}-linux-x64.zip" -o /tmp/sonar-scanner.zip && \
     unzip /tmp/sonar-scanner.zip -d /opt && \
-    mv /opt/sonar-scanner-${SONAR_SCANNER_VERSION}-linux /opt/sonar-scanner && \
+    mv /opt/sonar-scanner-${SONAR_SCANNER_VERSION}-linux-x64 /opt/sonar-scanner && \
     rm /tmp/sonar-scanner.zip
 
 ENV SONAR_SCANNER_HOME=/opt/sonar-scanner

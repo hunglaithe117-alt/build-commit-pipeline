@@ -49,7 +49,7 @@ class ScanJob(BaseModel):
     commit_sha: str
     status: ScanJobStatus
     retry_count: int = 0
-    max_retries: int = 5
+    max_retries: int = 3
     last_error: Optional[str] = None
     last_worker_id: Optional[str] = None
     sonar_analysis_id: Optional[str] = None

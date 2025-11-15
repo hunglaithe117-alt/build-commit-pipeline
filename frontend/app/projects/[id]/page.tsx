@@ -8,7 +8,7 @@ import { MetricCard } from "@/components/MetricCard";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
-import { api, Project } from "@/lib/api";
+import { api, API_BASE_URL, Project } from "@/lib/api";
 
 export default function ProjectDetailPage() {
   const params = useParams<{ id: string }>();
@@ -54,12 +54,18 @@ export default function ProjectDetailPage() {
     }
   };
 
+  const exportHref = projectId
+    ? `${API_BASE_URL}/api/projects/${projectId}/results/export`
+    : "#";
+
   return (
     <section className="space-y-8">
       <div className="flex items-center justify-between">
         <div>
           <p className="text-sm text-muted-foreground">Project</p>
-          <h1 className="text-2xl font-semibold">{project?.project_name ?? "Đang tải..."}</h1>
+          <h1 className="text-2xl font-semibold">
+            {project?.project_name ?? "Đang tải..."}
+          </h1>
         </div>
         <Button variant="outline" asChild>
           <Link href="/projects">Quay lại danh sách</Link>
@@ -67,7 +73,9 @@ export default function ProjectDetailPage() {
       </div>
 
       {message && <p className="text-sm text-slate-700">{message}</p>}
-      {loading && <p className="text-sm text-muted-foreground">Đang tải dữ liệu...</p>}
+      {loading && (
+        <p className="text-sm text-muted-foreground">Đang tải dữ liệu...</p>
+      )}
 
       {project && (
         <>
@@ -94,7 +102,9 @@ export default function ProjectDetailPage() {
               </div>
               <div>
                 <p className="text-muted-foreground">File CSV</p>
-                <p className="font-medium break-all">{project.source_filename ?? "Không xác định"}</p>
+                <p className="font-medium break-all">
+                  {project.source_filename ?? "Không xác định"}
+                </p>
               </div>
               <div>
                 <p className="text-muted-foreground">Cập nhật</p>
@@ -105,8 +115,8 @@ export default function ProjectDetailPage() {
             </CardContent>
           </Card>
           <div className="flex gap-3">
-            <Button asChild variant="outline">
-              <a href={`/api/projects/${projectId}/results/export`} target="_blank" rel="noreferrer">
+            <Button asChild variant="outline" disabled={!projectId}>
+              <a href={exportHref} download>
                 Download kết quả (CSV)
               </a>
             </Button>
@@ -123,15 +133,22 @@ export default function ProjectDetailPage() {
                   id="config-upload"
                   type="file"
                   accept=".properties,.txt"
-                  onChange={(event) => setConfigFile(event.target.files?.[0] || null)}
+                  onChange={(event) =>
+                    setConfigFile(event.target.files?.[0] || null)
+                  }
                 />
               </div>
-              <Button type="button" onClick={handleSaveConfig} disabled={saving || !configFile}>
+              <Button
+                type="button"
+                onClick={handleSaveConfig}
+                disabled={saving || !configFile}
+              >
                 {saving ? "Đang lưu..." : "Cập nhật"}
               </Button>
               {project.sonar_config?.updated_at && (
                 <p className="text-xs text-muted-foreground">
-                  Lần cập nhật gần nhất: {new Date(project.sonar_config.updated_at).toLocaleString()}
+                  Lần cập nhật gần nhất:{" "}
+                  {new Date(project.sonar_config.updated_at).toLocaleString()}
                 </p>
               )}
             </CardContent>

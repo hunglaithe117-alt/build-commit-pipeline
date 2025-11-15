@@ -23,7 +23,7 @@ celery_app.conf.update(
     task_reject_on_worker_lost=True,
     task_retry_backoff=True,
     task_retry_jitter=True,
-    task_default_max_retries=3,
+    task_default_max_retries=2,
     task_routes={
         "app.tasks.sonar.export_metrics": {"queue": "pipeline.exports"},
         "app.tasks.sonar.run_scan_job": {"queue": "pipeline.scan"},

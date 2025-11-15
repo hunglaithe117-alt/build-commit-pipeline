@@ -2,6 +2,7 @@
 
 import { ColumnDef } from "@tanstack/react-table";
 import { useEffect, useMemo, useState } from "react";
+import JSONTree from "react-json-tree";
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { DataTable } from "@/components/ui/data-table";
@@ -59,12 +60,30 @@ export default function ScanResultsPage() {
         cell: ({ row }) => {
           const metrics = row.original.metrics || {};
           return (
-            <div className="text-xs text-slate-600">
-              {Object.entries(metrics).map(([k, v]) => (
-                <div key={k}>
-                  <span className="font-medium">{k}</span>: {v}
-                </div>
-              ))}
+            <div className="max-h-56 overflow-auto rounded-md border bg-slate-50 p-2 text-xs">
+              <JSONTree
+                data={metrics as Record<string, unknown>}
+                hideRoot
+                shouldExpandNodeInitially={(_, __, level) => level < 1}
+                theme={{
+                  base00: "#ffffff",
+                  base01: "#f5f5f5",
+                  base02: "#f0f0f0",
+                  base03: "#555555",
+                  base04: "#777777",
+                  base05: "#111111",
+                  base06: "#111111",
+                  base07: "#111111",
+                  base08: "#c92c2c",
+                  base09: "#1d7af2",
+                  base0A: "#f7b731",
+                  base0B: "#1b7c3c",
+                  base0C: "#0aa0d2",
+                  base0D: "#2e6fd1",
+                  base0E: "#8e44ad",
+                  base0F: "#ad6800",
+                }}
+              />
             </div>
           );
         },
