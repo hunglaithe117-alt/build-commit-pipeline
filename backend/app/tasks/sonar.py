@@ -220,7 +220,6 @@ def export_metrics(
         project_id=project_id,
         job_id=job_id,
         sonar_project_key=component_key,
-        sonar_analysis_id=analysis_id or job.get("sonar_analysis_id") or "",
         metrics=metrics,
     )
 
@@ -229,7 +228,6 @@ def export_metrics(
         status=ScanJobStatus.success.value,
         last_error=None,
         last_finished_at=datetime.utcnow(),
-        sonar_analysis_id=analysis_id or job.get("sonar_analysis_id"),
     )
     repository.update_project(project_id, processed_delta=1)
     _check_project_completion(project_id)

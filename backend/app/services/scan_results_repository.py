@@ -16,7 +16,6 @@ class ScanResultsRepository(MongoRepositoryBase):
         project_id: str,
         job_id: str,
         sonar_project_key: str,
-        sonar_analysis_id: str,
         metrics: Dict[str, Any],
     ) -> Dict[str, Any]:
         now = datetime.utcnow()
@@ -27,7 +26,6 @@ class ScanResultsRepository(MongoRepositoryBase):
                 "$set": {
                     "project_id": project_id,
                     "sonar_project_key": sonar_project_key,
-                    "sonar_analysis_id": sonar_analysis_id,
                     "metrics": metrics,
                     "updated_at": now,
                 },
@@ -61,7 +59,7 @@ class ScanResultsRepository(MongoRepositoryBase):
         collection = self.db[self.collections.scan_results_collection]
         query = filters or {}
 
-        allowed = {"created_at", "sonar_project_key", "sonar_analysis_id"}
+        allowed = {"created_at", "sonar_project_key"}
         sort_field = sort_by if sort_by in allowed else "created_at"
         sort_direction = -1 if sort_dir.lower() == "desc" else 1
 

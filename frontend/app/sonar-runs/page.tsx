@@ -40,7 +40,12 @@ export default function ScanResultsPage() {
   };
 
   useEffect(() => {
-    handleServerChange({ pageIndex: 0, pageSize: 25, sorting: null, filters: {} }).catch(() => null);
+    handleServerChange({
+      pageIndex: 0,
+      pageSize: 25,
+      sorting: null,
+      filters: {},
+    }).catch(() => null);
   }, []);
 
   const columns = useMemo<ColumnDef<ScanResult>[]>(() => {
@@ -48,11 +53,6 @@ export default function ScanResultsPage() {
       {
         accessorKey: "sonar_project_key",
         header: "Component",
-      },
-      {
-        accessorKey: "sonar_analysis_id",
-        header: "Analysis ID",
-        cell: ({ row }) => <span className="font-mono text-xs">{row.original.sonar_analysis_id}</span>,
       },
       {
         id: "metrics",

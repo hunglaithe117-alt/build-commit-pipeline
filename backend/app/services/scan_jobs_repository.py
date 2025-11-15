@@ -36,7 +36,6 @@ class ScanJobsRepository(MongoRepositoryBase):
             "max_retries": max_retries,
             "last_error": None,
             "last_worker_id": None,
-            "sonar_analysis_id": None,
             "sonar_instance": None,
             "s3_log_key": None,
             "log_path": None,
@@ -85,7 +84,6 @@ class ScanJobsRepository(MongoRepositoryBase):
         status: Optional[str] = None,
         last_error: Any = _UNSET,
         retry_count_delta: Optional[int] = None,
-        sonar_analysis_id: Any = _UNSET,
         repository_url: Any = _UNSET,
         last_worker_id: Any = _UNSET,
         last_started_at: Any = _UNSET,
@@ -102,8 +100,6 @@ class ScanJobsRepository(MongoRepositoryBase):
             set_updates["status"] = status
         if last_error is not _UNSET:
             set_updates["last_error"] = last_error
-        if sonar_analysis_id is not _UNSET:
-            set_updates["sonar_analysis_id"] = sonar_analysis_id
         if repository_url is not _UNSET:
             set_updates["repository_url"] = repository_url
         if last_worker_id is not _UNSET:

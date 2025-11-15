@@ -30,7 +30,6 @@ export type ScanJob = {
   max_retries: number;
   last_error?: string | null;
   sonar_instance?: string | null;
-  sonar_analysis_id?: string | null;
   component_key?: string | null;
   config_override?: string | null;
   config_source?: string | null;
@@ -68,16 +67,19 @@ export type ScanResult = {
   job_id: string;
   project_id: string;
   sonar_project_key: string;
-  sonar_analysis_id: string;
   metrics: Record<string, string>;
   created_at: string;
 };
 
-export const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
+export const API_BASE_URL =
+  process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
 
 async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
   const response = await fetch(`${API_BASE_URL}${path}`, {
-    headers: { "Content-Type": "application/json", ...(options?.headers || {}) },
+    headers: {
+      "Content-Type": "application/json",
+      ...(options?.headers || {}),
+    },
     ...options,
   });
   if (!response.ok) {
@@ -103,7 +105,8 @@ function buildPath(path: string, qs?: Record<string, any>) {
 }
 
 export const api = {
-  listProjects: (limit?: number) => apiFetch<Project[]>(buildPath("/api/projects", { limit })),
+  listProjects: (limit?: number) =>
+    apiFetch<Project[]>(buildPath("/api/projects", { limit })),
   listProjectsPaginated: (
     page?: number,
     pageSize?: number,
@@ -121,7 +124,11 @@ export const api = {
       })
     ),
   getProject: (id: string) => apiFetch<Project>(`/api/projects/${id}`),
-  uploadProject: async (file: File, name: string, options?: { sonarConfig?: File }) => {
+  uploadProject: async (
+    file: File,
+    name: string,
+    options?: { sonarConfig?: File }
+  ) => {
     const formData = new FormData();
     formData.append("name_form", name);
     formData.append("file", file);
@@ -149,7 +156,8 @@ export const api = {
     }
     return (await response.json()) as Project;
   },
-  triggerCollection: (id: string) => apiFetch(`/api/projects/${id}/collect`, { method: "POST" }),
+  triggerCollection: (id: string) =>
+    apiFetch(`/api/projects/${id}/collect`, { method: "POST" }),
   listScanJobsPaginated: (
     page?: number,
     pageSize?: number,
@@ -167,7 +175,10 @@ export const api = {
       })
     ),
   getWorkersStats: () => apiFetch<WorkersStats>("/api/scan-jobs/workers-stats"),
-  retryScanJob: (id: string, payload: { config_override?: string; config_source?: string }) =>
+  retryScanJob: (
+    id: string,
+    payload: { config_override?: string; config_source?: string }
+  ) =>
     apiFetch<ScanJob>(`/api/scan-jobs/${id}/retry`, {
       method: "POST",
       body: JSON.stringify(payload),

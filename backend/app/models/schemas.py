@@ -52,7 +52,6 @@ class ScanJob(BaseModel):
     max_retries: int = 3
     last_error: Optional[str] = None
     last_worker_id: Optional[str] = None
-    sonar_analysis_id: Optional[str] = None
     created_at: datetime
     updated_at: datetime
     last_started_at: Optional[datetime] = None
@@ -84,7 +83,6 @@ class ScanResult(BaseModel):
     project_id: str
     job_id: str
     sonar_project_key: str
-    sonar_analysis_id: str
     metrics: ScanMetrics | Dict[str, float | int | str]
     created_at: datetime
 

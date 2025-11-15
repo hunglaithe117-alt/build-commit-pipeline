@@ -153,7 +153,6 @@ async def download_project_results(project_id: str) -> StreamingResponse:
     )
     headers = [
         "sonar_project_key",
-        "sonar_analysis_id",
         "job_id",
         "created_at",
         *metric_keys,
@@ -171,7 +170,6 @@ async def download_project_results(project_id: str) -> StreamingResponse:
             metrics = item.get("metrics") or {}
             row = [
                 item.get("sonar_project_key"),
-                item.get("sonar_analysis_id"),
                 item.get("job_id"),
                 (
                     item.get("created_at").isoformat()

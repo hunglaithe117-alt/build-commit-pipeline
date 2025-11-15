@@ -17,6 +17,7 @@ import logging
 router = APIRouter()
 LOG = logging.getLogger("sonar_api")
 
+
 @router.get("/runs")
 async def list_runs(
     page: int = Query(default=1, ge=1),
@@ -34,10 +35,15 @@ async def list_runs(
         sort_dir,
         parsed_filters,
     )
-    return {"items": [ScanResult(**run) for run in result["items"]], "total": result["total"]}
+    return {
+        "items": [ScanResult(**run) for run in result["items"]],
+        "total": result["total"],
+    }
 
 
-def _validate_signature(body: bytes, signature: Optional[str], token_header: Optional[str]) -> None:
+def _validate_signature(
+    body: bytes, signature: Optional[str], token_header: Optional[str]
+) -> None:
     secret = settings.sonarqube.webhook_secret
     if token_header:
         if token_header != secret:
@@ -71,12 +77,9 @@ async def sonar_webhook(
     if not scan_job:
         raise HTTPException(status_code=404, detail="Scan job not tracked")
 
-    analysis_id = payload.get("analysis", {}).get("key") or payload.get("analysisId")
-
     await run_in_threadpool(
         repository.update_scan_job,
         scan_job["id"],
-        sonar_analysis_id=analysis_id,
         status=ScanJobStatus.running.value,
     )
 
@@ -84,7 +87,6 @@ async def sonar_webhook(
         component_key,
         job_id=scan_job["id"],
         project_id=scan_job["project_id"],
-        analysis_id=analysis_id,
         commit_sha=scan_job.get("commit_sha"),
     )
     return {"received": True}
