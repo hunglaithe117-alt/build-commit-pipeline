@@ -9,8 +9,8 @@ from pymongo import ReturnDocument
 from app.services.repository_base import MongoRepositoryBase
 
 
-class DeadLettersRepository(MongoRepositoryBase):
-    def insert_dead_letter(self, payload: Dict[str, Any], reason: str) -> Dict[str, Any]:
+class FailedCommitsRepository(MongoRepositoryBase):
+    def insert_failed_commit(self, payload: Dict[str, Any], reason: str) -> Dict[str, Any]:
         now = datetime.utcnow()
         doc = {
             "payload": payload,
@@ -21,20 +21,20 @@ class DeadLettersRepository(MongoRepositoryBase):
             "created_at": now,
             "updated_at": now,
         }
-        result = self.db[self.collections.dead_letter_collection].insert_one(doc)
+        result = self.db[self.collections.failed_commits_collection].insert_one(doc)
         doc["id"] = str(result.inserted_id)
         return doc
 
-    def list_dead_letters(self, limit: int = 200) -> List[Dict[str, Any]]:
+    def list_failed_commits(self, limit: int = 200) -> List[Dict[str, Any]]:
         cursor = (
-            self.db[self.collections.dead_letter_collection]
+            self.db[self.collections.failed_commits_collection]
             .find()
             .sort("created_at", -1)
             .limit(limit)
         )
         return [self._serialize(doc) for doc in cursor]
 
-    def list_dead_letters_paginated(
+    def list_failed_commits_paginated(
         self,
         page: int = 1,
         page_size: int = 20,
@@ -42,11 +42,11 @@ class DeadLettersRepository(MongoRepositoryBase):
         sort_dir: str = "desc",
         filters: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
-        """Return paginated dead letters and total count (page is 1-based)."""
+        """Return paginated failed commits and total count (page is 1-based)."""
         if page < 1:
             page = 1
         skip = (page - 1) * page_size
-        collection = self.db[self.collections.dead_letter_collection]
+        collection = self.db[self.collections.failed_commits_collection]
         query = filters or {}
 
         allowed = {"created_at", "status"}
@@ -63,15 +63,15 @@ class DeadLettersRepository(MongoRepositoryBase):
         items = [self._serialize(doc) for doc in cursor]
         return {"items": items, "total": total}
 
-    def get_dead_letter(self, dead_letter_id: str) -> Optional[Dict[str, Any]]:
-        doc = self.db[self.collections.dead_letter_collection].find_one(
-            {"_id": ObjectId(dead_letter_id)}
+    def get_failed_commit(self, record_id: str) -> Optional[Dict[str, Any]]:
+        doc = self.db[self.collections.failed_commits_collection].find_one(
+            {"_id": ObjectId(record_id)}
         )
         return self._serialize(doc) if doc else None
 
-    def update_dead_letter(
+    def update_failed_commit(
         self,
-        dead_letter_id: str,
+        record_id: str,
         *,
         config_override: Any = None,
         config_source: Any = None,
@@ -90,21 +90,21 @@ class DeadLettersRepository(MongoRepositoryBase):
             updates["resolved_at"] = resolved_at
         if payload is not None:
             updates["payload"] = payload
-        doc = self.db[self.collections.dead_letter_collection].find_one_and_update(
-            {"_id": ObjectId(dead_letter_id)},
+        doc = self.db[self.collections.failed_commits_collection].find_one_and_update(
+            {"_id": ObjectId(record_id)},
             {"$set": updates},
             return_document=ReturnDocument.AFTER,
         )
         return self._serialize(doc) if doc else None
 
     def count_by_job_id(self, job_id: str) -> int:
-        """Count dead letters for a specific job."""
-        return self.db[self.collections.dead_letter_collection].count_documents(
+        """Count failed commits for a specific job."""
+        return self.db[self.collections.failed_commits_collection].count_documents(
             {"payload.job_id": job_id}
         )
 
-    def count_by_data_source_id(self, data_source_id: str) -> int:
-        """Count dead letters for a specific data source."""
-        return self.db[self.collections.dead_letter_collection].count_documents(
-            {"payload.data_source_id": data_source_id}
+    def count_by_project_id(self, project_id: str) -> int:
+        """Count failed commits for a specific project."""
+        return self.db[self.collections.failed_commits_collection].count_documents(
+            {"payload.project_id": project_id}
         )

@@ -213,8 +213,6 @@ class SonarCommitRunner:
     def build_scan_command(
         self,
         component_key: str,
-        project_type: str,
-        working_dir: Path,
         config_path: Optional[Path] = None,
     ) -> List[str]:
         scanner_args = [
@@ -346,11 +344,8 @@ class SonarCommitRunner:
                 # Now attempt to create the worktree (will raise if commit still missing)
                 worktree = self.create_worktree(commit_sha)
 
-            project_type = self.detect_project_type(worktree)
             effective_config = Path(config_path) if config_path else None
-            cmd = self.build_scan_command(
-                component_key, project_type, worktree, effective_config
-            )
+            cmd = self.build_scan_command(component_key, effective_config)
             LOG.debug("Scanning commit %s with command: %s", commit_sha, " ".join(cmd))
             output = run_command(cmd, cwd=worktree)
 
@@ -467,52 +462,9 @@ class MetricsExporter:
             writer.writerow(row)
         return measures
 
-    def append_commit_metrics(
-        self, component_key: str, destination: Path, commit_sha: Optional[str] = None
-    ) -> tuple[Dict[str, str], int]:
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        measures = self._fetch_measures(component_key, self.metrics)
-        if not measures:
-            LOG.warning(f"No measures returned for {component_key}")
-            return {}, 0
-
-        headers = ["component_key", "commit_sha", *self.metrics]
-        row = [
-            component_key,
-            commit_sha or "",
-            *[str(measures.get(metric, "")) for metric in self.metrics],
-        ]
-
-        record_count = 0
-        with destination.open("a+", encoding="utf-8", newline="") as handle:
-            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
-            try:
-                handle.seek(0, os.SEEK_END)
-                file_was_empty = handle.tell() == 0
-
-                handle.seek(0)
-                if file_was_empty:
-                    writer = csv.writer(handle, quoting=csv.QUOTE_MINIMAL)
-                    writer.writerow(headers)
-                    record_count = 0
-                else:
-                    record_count = max(sum(1 for _ in handle) - 1, 0)
-
-                handle.seek(0, os.SEEK_END)
-                writer = csv.writer(handle, quoting=csv.QUOTE_MINIMAL)
-                writer.writerow(row)
-                handle.flush()
-                record_count += 1
-            finally:
-                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
-
-        LOG.info(
-            "Appended metrics for %s to %s (total rows: %d)",
-            component_key,
-            destination,
-            record_count,
-        )
-        return measures, record_count
+    def collect_metrics(self, component_key: str) -> Dict[str, str]:
+        """Return the latest metrics for a Sonar component without writing to disk."""
+        return self._fetch_measures(component_key, self.metrics)
 
 
 __all__ = [

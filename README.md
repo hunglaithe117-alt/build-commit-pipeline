@@ -83,7 +83,7 @@ git checkout -b my-local-setup
 - **Bước 3 — Tạo thư mục dữ liệu local và cấp quyền (nếu cần)**
 
 ```bash
-mkdir -p ./data/sonar-work ./data/uploads ./data/exports ./data/dead_letter
+mkdir -p ./data/sonar-work ./data/uploads ./data/exports ./data/failed_commits
 # (Tùy chọn) nếu cần thay đổi quyền để Docker có thể ghi
 sudo chown -R $USER:$(id -g -n) ./data
 ```

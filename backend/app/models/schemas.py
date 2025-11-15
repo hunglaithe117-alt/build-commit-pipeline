@@ -2,97 +2,95 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import Enum
-from typing import Optional
+from typing import Dict, Optional
 
 from pydantic import BaseModel, Field
 
 
-class DataSourceStatus(str, Enum):
+class ProjectStatus(str, Enum):
     pending = "pending"
-    ready = "ready"
-    succeeded = "succeeded"
     processing = "processing"
-    failed = "failed"
+    finished = "finished"
 
 
-class JobStatus(str, Enum):
-    queued = "queued"
-    running = "running"
-    succeeded = "succeeded"
-    failed = "failed"
-    cancelled = "cancelled"
-
-
-class CSVSummary(BaseModel):
-    project_name: Optional[str] = None
-    project_key: Optional[str] = None
-    total_builds: int = 0
-    total_commits: int = 0
-    unique_branches: int = 0
-    first_commit: Optional[str] = None
-    last_commit: Optional[str] = None
+class ScanJobStatus(str, Enum):
+    pending = "PENDING"
+    running = "RUNNING"
+    success = "SUCCESS"
+    failed_temp = "FAILED_TEMP"
+    failed_permanent = "FAILED_PERMANENT"
 
 
 class SonarConfig(BaseModel):
-    content: str
-    source: str = Field(default="text")
-    filename: Optional[str] = None
-    file_path: Optional[str] = None
-    updated_at: datetime
-
-
-class DataSource(BaseModel):
-    id: str
-    name: str
     filename: str
     file_path: str
-    status: DataSourceStatus
-    created_at: datetime
-    updated_at: datetime
-    stats: Optional[CSVSummary] = None
-    sonar_config: Optional[SonarConfig] = None
-
-
-class Job(BaseModel):
-    id: str
-    data_source_id: str
-    status: JobStatus
-    processed: int = 0
-    total: int = 0
-    failed_count: int = 0
-    last_error: Optional[str] = None
-    current_commit: Optional[str] = None
-    sonar_instance: Optional[str] = None
-    created_at: datetime
     updated_at: datetime
 
-    @property
-    def progress(self) -> float:
-        if self.total == 0:
-            return 0.0
-        return min(1.0, self.processed / self.total)
 
-
-class SonarRun(BaseModel):
+class Project(BaseModel):
     id: str
-    data_source_id: str
+    project_name: str
     project_key: str
-    commit_sha: Optional[str] = None
-    job_id: Optional[str] = None
+    total_builds: str
+    total_commits: str
+    processed_commits: int = 0
+    failed_commits: int = 0
+    sonar_config: Optional[SonarConfig] = None
+    status: ProjectStatus = ProjectStatus.pending
+    source_filename: Optional[str] = None
+    source_path: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class ScanJob(BaseModel):
+    id: str
+    project_id: str
+    commit_sha: str
+    status: ScanJobStatus
+    retry_count: int = 0
+    max_retries: int = 5
+    last_error: Optional[str] = None
+    last_worker_id: Optional[str] = None
+    sonar_task_id: Optional[str] = None
+    sonar_analysis_id: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
+    last_started_at: Optional[datetime] = None
+    last_finished_at: Optional[datetime] = None
+    repository_url: Optional[str] = None
+    repo_slug: Optional[str] = None
+    project_key: Optional[str] = None
     component_key: Optional[str] = None
     sonar_instance: Optional[str] = None
-    sonar_host: Optional[str] = None
-    analysis_id: Optional[str] = None
-    status: str
-    started_at: datetime
-    finished_at: Optional[datetime] = None
-    metrics_path: Optional[str] = None
-    log_path: Optional[str] = None
     s3_log_key: Optional[str] = None
-    message: Optional[str] = None
+    log_path: Optional[str] = None
+    config_override: Optional[str] = None
+    config_source: Optional[str] = None
 
 
-class DeadLetter(BaseModel):
+class ScanMetrics(BaseModel):
+    bugs: int = 0
+    vulnerabilities: int = 0
+    code_smells: int = 0
+    coverage: float = 0.0
+    duplicated_lines_density: float = 0.0
+
+    class Config:
+        extra = "allow"
+
+
+class ScanResult(BaseModel):
+    id: str
+    project_id: str
+    job_id: str
+    sonar_project_key: str
+    sonar_analysis_id: str
+    metrics: ScanMetrics | Dict[str, float | int | str]
+    created_at: datetime
+
+
+class FailedCommit(BaseModel):
     id: str
     payload: dict
     reason: str
@@ -102,15 +100,3 @@ class DeadLetter(BaseModel):
     created_at: datetime
     updated_at: Optional[datetime] = None
     resolved_at: Optional[datetime] = None
-
-
-class OutputDataset(BaseModel):
-    id: str
-    job_id: str
-    data_source_id: Optional[str] = None
-    project_key: Optional[str] = None
-    repo_name: Optional[str] = None
-    path: str
-    metrics: list[str] = Field(default_factory=list)
-    record_count: int = 0
-    created_at: datetime

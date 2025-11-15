@@ -30,7 +30,7 @@ scrape_configs:
       - targets: [localhost]
         labels:
           job: dead-letter
-          __path__: /var/pipeline-data/dead_letter/*.json
+          __path__: /var/pipeline-data/failed_commits/*.json
 
   - job_name: pipeline-error-files
     static_configs:

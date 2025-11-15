@@ -3,19 +3,26 @@ from __future__ import annotations
 import json
 from typing import Optional
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, HTTPException, Query
 from fastapi.concurrency import run_in_threadpool
+from pydantic import BaseModel
 
 from app.celery_app import celery_app
 from app.core.config import settings
-from app.models import Job
+from app.models import ScanJob, ScanJobStatus
 from app.services import repository
+from app.tasks.sonar import run_scan_job
 
 router = APIRouter()
 
 
+class RetryScanJobRequest(BaseModel):
+    config_override: Optional[str] = None
+    config_source: Optional[str] = None
+
+
 @router.get("/")
-async def list_jobs(
+async def list_scan_jobs(
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=1000),
     sort_by: Optional[str] = Query(default=None),
@@ -25,26 +32,42 @@ async def list_jobs(
 
     parsed_filters = json.loads(filters) if filters else None
     result = await run_in_threadpool(
-        repository.list_jobs_paginated,
+        repository.list_scan_jobs_paginated,
         page,
         page_size,
         sort_by,
         sort_dir,
         parsed_filters,
     )
+    return {"items": [ScanJob(**job) for job in result["items"]], "total": result["total"]}
 
-    # Add failed_count for each job
-    items_with_failed = []
-    for job in result["items"]:
-        job_dict = dict(job)
-        # Count dead letters for this job
-        failed_count = await run_in_threadpool(
-            repository.count_dead_letters_by_job, job_dict["id"]
+
+@router.post("/{job_id}/retry", response_model=ScanJob)
+async def retry_scan_job(job_id: str, payload: RetryScanJobRequest) -> ScanJob:
+    job = await run_in_threadpool(repository.get_scan_job, job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Scan job not found")
+
+    update_kwargs = {}
+    if payload.config_override is not None:
+        update_kwargs["config_override"] = payload.config_override
+        update_kwargs["config_source"] = (
+            payload.config_source or job.get("config_source") or "text"
         )
-        job_dict["failed_count"] = failed_count
-        items_with_failed.append(Job(**job_dict))
 
-    return {"items": items_with_failed, "total": result["total"]}
+    updated = await run_in_threadpool(
+        repository.update_scan_job,
+        job_id,
+        status=ScanJobStatus.pending.value,
+        last_error=None,
+        last_worker_id=None,
+        **update_kwargs,
+    )
+    if not updated:
+        raise HTTPException(status_code=404, detail="Failed to update scan job")
+
+    run_scan_job.delay(job_id)
+    return ScanJob(**updated)
 
 
 @router.get("/workers-stats")
@@ -150,22 +173,12 @@ async def get_workers_stats() -> dict:
                 current_commit = None
                 current_repo = None
 
-                if task.get("name") == "app.tasks.sonar.run_commit_scan":
-                    # Arguments: job_id, data_source_id, commit (dict)
-                    if len(task_args) >= 3:
-                        commit_data = task_args[2]
-                        if isinstance(commit_data, dict):
-                            current_commit = commit_data.get("commit_sha")
-                            current_repo = commit_data.get(
-                                "repo_url"
-                            ) or commit_data.get("project_key")
-                    elif "commit" in task_kwargs:
-                        commit_data = task_kwargs["commit"]
-                        if isinstance(commit_data, dict):
-                            current_commit = commit_data.get("commit_sha")
-                            current_repo = commit_data.get(
-                                "repo_url"
-                            ) or commit_data.get("project_key")
+                if task.get("name") == "app.tasks.sonar.run_scan_job":
+                    # Arguments: scan_job_id
+                    if task_args:
+                        current_commit = task_args[0]
+                    elif "scan_job_id" in task_kwargs:
+                        current_commit = task_kwargs["scan_job_id"]
 
                 worker_info["tasks"].append(
                     {
@@ -180,17 +193,13 @@ async def get_workers_stats() -> dict:
 
         # Count total active scan tasks
         total_active_scans = sum(
-            len(
-                [t for t in tasks if t.get("name") == "app.tasks.sonar.run_commit_scan"]
-            )
+            len([t for t in tasks if t.get("name") == "app.tasks.sonar.run_scan_job"])
             for tasks in active_tasks.values()
         )
 
         # Count reserved scan tasks
         total_reserved_scans = sum(
-            len(
-                [t for t in tasks if t.get("name") == "app.tasks.sonar.run_commit_scan"]
-            )
+            len([t for t in tasks if t.get("name") == "app.tasks.sonar.run_scan_job"])
             for tasks in reserved_tasks.values()
         )
 

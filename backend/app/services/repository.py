@@ -1,109 +1,103 @@
 from __future__ import annotations
 
 
-from app.services.data_sources_repository import DataSourceRepository
-from app.services.jobs_repository import JobRepository
-from app.services.sonar_runs_repository import SonarRunsRepository
-from app.services.dead_letters_repository import DeadLettersRepository
-from app.services.outputs_repository import OutputsRepository
+from app.services.projects_repository import ProjectsRepository
+from app.services.scan_jobs_repository import ScanJobsRepository
+from app.services.scan_results_repository import ScanResultsRepository
+from app.services.failed_commits_repository import FailedCommitsRepository
 
 
 class Repository:
     def __init__(self) -> None:
-        self.data_sources = DataSourceRepository()
-        self.jobs = JobRepository()
-        self.sonar_runs = SonarRunsRepository()
-        self.dead_letters = DeadLettersRepository()
-        self.outputs = OutputsRepository()
+        self.projects = ProjectsRepository()
+        self.scan_jobs = ScanJobsRepository()
+        self.scan_results = ScanResultsRepository()
+        self.failed_commits = FailedCommitsRepository()
 
-    # Data source proxies
-    def create_data_source(self, *a, **k):
-        return self.data_sources.create_data_source(*a, **k)
+    # Project proxies
+    def create_project(self, *a, **k):
+        return self.projects.create_project(*a, **k)
 
-    def list_data_sources(self, *a, **k):
-        return self.data_sources.list_data_sources(*a, **k)
+    def list_projects(self, *a, **k):
+        return self.projects.list_projects(*a, **k)
 
-    def list_data_sources_paginated(self, *a, **k):
-        return self.data_sources.list_data_sources_paginated(*a, **k)
+    def list_projects_paginated(self, *a, **k):
+        return self.projects.list_projects_paginated(*a, **k)
 
-    def list_jobs_paginated(self, *a, **k):
-        return self.jobs.list_jobs_paginated(*a, **k)
+    def get_project(self, *a, **k):
+        return self.projects.get_project(*a, **k)
 
-    def get_data_source(self, *a, **k):
-        return self.data_sources.get_data_source(*a, **k)
+    def find_project_by_key(self, *a, **k):
+        return self.projects.find_project_by_key(*a, **k)
 
-    def find_data_source_by_project_key(self, *a, **k):
-        return self.data_sources.find_data_source_by_project_key(*a, **k)
+    def update_project(self, *a, **k):
+        return self.projects.update_project(*a, **k)
 
-    def update_data_source(self, *a, **k):
-        return self.data_sources.update_data_source(*a, **k)
+    # Scan jobs
+    def create_scan_job(self, *a, **k):
+        return self.scan_jobs.create_scan_job(*a, **k)
 
-    # Jobs
-    def create_job(self, *a, **k):
-        return self.jobs.create_job(*a, **k)
+    def get_scan_job(self, *a, **k):
+        return self.scan_jobs.get_scan_job(*a, **k)
 
-    def get_job(self, *a, **k):
-        return self.jobs.get_job(*a, **k)
+    def claim_scan_job(self, *a, **k):
+        return self.scan_jobs.claim_job(*a, **k)
 
-    def update_job(self, *a, **k):
-        return self.jobs.update_job(*a, **k)
+    def update_scan_job(self, *a, **k):
+        return self.scan_jobs.update_scan_job(*a, **k)
 
-    def list_jobs(self, *a, **k):
-        return self.jobs.list_jobs(*a, **k)
+    def list_scan_jobs(self, *a, **k):
+        return self.scan_jobs.list_scan_jobs(*a, **k)
 
-    # Sonar runs
-    def upsert_sonar_run(self, *a, **k):
-        return self.sonar_runs.upsert_sonar_run(*a, **k)
+    def list_scan_jobs_paginated(self, *a, **k):
+        return self.scan_jobs.list_scan_jobs_paginated(*a, **k)
 
-    def list_sonar_runs(self, *a, **k):
-        return self.sonar_runs.list_sonar_runs(*a, **k)
+    def find_scan_job_by_component(self, *a, **k):
+        return self.scan_jobs.find_job_by_component_key(*a, **k)
 
-    def list_sonar_runs_paginated(self, *a, **k):
-        return self.sonar_runs.list_sonar_runs_paginated(*a, **k)
+    def find_stalled_scan_jobs(self, *a, **k):
+        return self.scan_jobs.find_stalled_jobs(*a, **k)
 
-    def find_sonar_run_by_component(self, *a, **k):
-        return self.sonar_runs.find_sonar_run_by_component(*a, **k)
+    # Scan results
+    def upsert_scan_result(self, *a, **k):
+        return self.scan_results.upsert_result(*a, **k)
 
-    # Dead letters
-    def insert_dead_letter(self, *a, **k):
-        return self.dead_letters.insert_dead_letter(*a, **k)
+    def list_scan_results(self, *a, **k):
+        return self.scan_results.list_results(*a, **k)
 
-    def list_dead_letters(self, *a, **k):
-        return self.dead_letters.list_dead_letters(*a, **k)
+    def list_scan_results_paginated(self, *a, **k):
+        return self.scan_results.list_results_paginated(*a, **k)
 
-    def list_dead_letters_paginated(self, *a, **k):
-        return self.dead_letters.list_dead_letters_paginated(*a, **k)
+    def get_scan_result_by_job(self, *a, **k):
+        return self.scan_results.get_by_job_id(*a, **k)
 
-    def get_dead_letter(self, *a, **k):
-        return self.dead_letters.get_dead_letter(*a, **k)
+    def get_scan_result(self, *a, **k):
+        return self.scan_results.get_result(*a, **k)
 
-    def update_dead_letter(self, *a, **k):
-        return self.dead_letters.update_dead_letter(*a, **k)
+    def list_scan_results_by_project(self, *a, **k):
+        return self.scan_results.list_by_project(*a, **k)
 
-    def count_dead_letters_by_job(self, *a, **k):
-        return self.dead_letters.count_by_job_id(*a, **k)
+    # Failed commits
+    def insert_failed_commit(self, *a, **k):
+        return self.failed_commits.insert_failed_commit(*a, **k)
 
-    def count_dead_letters_by_data_source(self, *a, **k):
-        return self.dead_letters.count_by_data_source_id(*a, **k)
+    def list_failed_commits(self, *a, **k):
+        return self.failed_commits.list_failed_commits(*a, **k)
 
-    # Outputs
-    def add_output(self, *a, **k):
-        return self.outputs.add_output(*a, **k)
+    def list_failed_commits_paginated(self, *a, **k):
+        return self.failed_commits.list_failed_commits_paginated(*a, **k)
 
-    def list_outputs(self, *a, **k):
-        return self.outputs.list_outputs(*a, **k)
+    def get_failed_commit(self, *a, **k):
+        return self.failed_commits.get_failed_commit(*a, **k)
 
-    def list_outputs_paginated(self, *a, **k):
-        return self.outputs.list_outputs_paginated(*a, **k)
+    def update_failed_commit(self, *a, **k):
+        return self.failed_commits.update_failed_commit(*a, **k)
 
-    def get_output(self, *a, **k):
-        return self.outputs.get_output(*a, **k)
+    def count_failed_commits_by_job(self, *a, **k):
+        return self.failed_commits.count_by_job_id(*a, **k)
 
-    def update_output(self, *a, **k):
-        return self.outputs.update_output(*a, **k)
-
-    def find_output_by_job_and_path(self, *a, **k):
-        return self.outputs.find_output_by_job_and_path(*a, **k)
+    def count_failed_commits_by_project(self, *a, **k):
+        return self.failed_commits.count_by_project_id(*a, **k)
 
 
 repository = Repository()

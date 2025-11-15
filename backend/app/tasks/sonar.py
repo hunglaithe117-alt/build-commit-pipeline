@@ -1,326 +1,272 @@
 from __future__ import annotations
 
-from pathlib import Path
-from typing import Dict, Optional, Tuple
+from datetime import datetime, timedelta
+from typing import Any, Dict, Optional
 
 from celery.utils.log import get_task_logger
 
 from app.celery_app import celery_app
 from app.core.config import settings
-from pipeline.sonar import MetricsExporter, get_runner_for_instance
+from app.models import ProjectStatus, ScanJobStatus
 from app.services import repository
+from pipeline.sonar import MetricsExporter, get_runner_for_instance, normalize_repo_url
 
 logger = get_task_logger(__name__)
 
 
-def _sanitize_segment(value: Optional[str], fallback: str) -> str:
-    candidate = (value or "").strip() or fallback
-    return "".join(ch if ch.isalnum() or ch in {"-", "_"} else "_" for ch in candidate)
+class PermanentScanError(Exception):
+    """Raised when a scan failure should not be retried."""
 
 
-def _build_metrics_destination(
-    project_key: Optional[str], job_id: Optional[str], data_source_id: Optional[str]
-) -> Path:
-    project_part = _sanitize_segment(project_key, "project")
-    job_part = _sanitize_segment(job_id, "ad-hoc")
-    data_source_part = _sanitize_segment(data_source_id, "unknown")
-    return (
-        Path(settings.paths.exports)
-        / project_part
-        / data_source_part
-        / f"{job_part}_metrics.csv"
+def _retry_backoff(attempt: int) -> int:
+    """Simple exponential backoff capped at 10 minutes."""
+    return min(60 * attempt, 600)
+
+
+def _safe_int(value: Optional[str | int]) -> int:
+    try:
+        return int(value) if value is not None else 0
+    except (TypeError, ValueError):
+        return 0
+
+
+def _check_project_completion(project_id: str) -> None:
+    project = repository.get_project(project_id)
+    if not project:
+        return
+    total_commits = _safe_int(project.get("total_commits"))
+    if not total_commits:
+        return
+    completed = (project.get("processed_commits") or 0) + (
+        project.get("failed_commits") or 0
     )
+    if completed >= total_commits:
+        repository.update_project(project_id, status=ProjectStatus.finished.value)
 
 
-def process_commit(
-    job_id: str,
-    data_source_id: str,
-    commit: Dict[str, str],
-    runner,
-    config_path: Optional[str] = None,
-) -> Tuple[str, bool]:
-    commit_sha = commit.get("commit_sha")
-    project_key = commit.get("project_key")
-    repo_url = commit.get("repo_url")
-    if not all([commit_sha, project_key, repo_url]):
-        raise ValueError("Commit payload missing mandatory fields.")
-
-    instance = runner.instance
-    component_key = f"{project_key}_{commit_sha}"
-    repository.update_job(job_id, status="running", current_commit=commit_sha)
-    repository.upsert_sonar_run(
-        data_source_id=data_source_id,
-        project_key=project_key,
-        commit_sha=commit_sha,
-        job_id=job_id,
-        status="running",
-        component_key=component_key,
-        sonar_instance=instance.name,
-        sonar_host=instance.host,
+def _handle_scan_failure(
+    task,
+    job: Dict[str, Any],
+    project: Dict[str, Any],
+    exc: Exception,
+) -> str:
+    now = datetime.utcnow()
+    message = str(exc)
+    permanent = isinstance(exc, PermanentScanError)
+    status = (
+        ScanJobStatus.failed_permanent.value
+        if permanent
+        else ScanJobStatus.failed_temp.value
     )
+    updated = repository.update_scan_job(
+        job["id"],
+        status=status,
+        last_error=message,
+        retry_count_delta=1,
+        last_finished_at=now,
+    )
+    retry_count = (updated or job).get("retry_count", 0)
+    max_retries = job.get("max_retries") or settings.pipeline.default_retry_limit
+
+    if permanent or retry_count >= max_retries:
+        repository.update_scan_job(
+            job["id"],
+            status=ScanJobStatus.failed_permanent.value,
+            last_error=message,
+            last_finished_at=now,
+        )
+        repository.update_project(project["id"], failed_delta=1)
+        repository.insert_failed_commit(
+            payload={
+                "job_id": job["id"],
+                "project_id": project["id"],
+                "project_key": project.get("project_key"),
+                "commit_sha": job.get("commit_sha"),
+                "repository_url": job.get("repository_url"),
+                "repo_slug": job.get("repo_slug"),
+                "error": message,
+            },
+            reason="scan-failed",
+        )
+        _check_project_completion(project["id"])
+        logger.error(
+            "Scan job %s failed permanently after %s attempts: %s",
+            job["id"],
+            retry_count,
+            message,
+        )
+        return job["id"]
+
+    try:
+        task.max_retries = max_retries
+    except Exception:
+        pass
+    logger.warning(
+        "Scan job %s failed temporarily (attempt %s/%s): %s",
+        job["id"],
+        retry_count,
+        max_retries,
+        message,
+    )
+    raise task.retry(exc=exc, countdown=_retry_backoff(retry_count))
+
+
+@celery_app.task(bind=True, max_retries=None)
+def run_scan_job(self, scan_job_id: str) -> str:
+    job = repository.get_scan_job(scan_job_id)
+    if not job:
+        raise ValueError(f"Scan job {scan_job_id} not found")
+    if job.get("status") in {
+        ScanJobStatus.success.value,
+        ScanJobStatus.failed_permanent.value,
+    }:
+        return job["id"]
+
+    worker_id = getattr(self.request, "hostname", "worker")
+    claimed = repository.claim_scan_job(scan_job_id, worker_id)
+    if not claimed:
+        logger.info("Scan job %s is already being processed", scan_job_id)
+        return job["id"]
+    job = claimed
+
+    project = repository.get_project(job["project_id"])
+    if not project:
+        repository.update_scan_job(
+            job["id"],
+            status=ScanJobStatus.failed_permanent.value,
+            last_error="Project not found",
+            last_finished_at=datetime.utcnow(),
+        )
+        repository.insert_failed_commit(
+            payload={
+                "job_id": job["id"],
+                "project_id": job["project_id"],
+                "commit_sha": job.get("commit_sha"),
+            },
+            reason="project-missing",
+        )
+        return job["id"]
+
+    repo_url = normalize_repo_url(job.get("repository_url"), job.get("repo_slug"))
+    sonar_config = (project.get("sonar_config") or {}).get("file_path")
+    project_key = job.get("project_key") or project.get("project_key")
+    runner = get_runner_for_instance(project_key)
+    repository.update_scan_job(job["id"], sonar_instance=runner.instance.name)
+
+    override_text = job.get("config_override")
+    if override_text:
+        config_path = str(runner.ensure_override_config(override_text))
+    else:
+        config_path = sonar_config
+
     try:
         result = runner.scan_commit(
             repo_url=repo_url,
-            commit_sha=commit_sha,
-            repo_slug=commit.get("repo_slug"),
+            commit_sha=job["commit_sha"],
+            repo_slug=job.get("repo_slug"),
             config_path=config_path,
         )
     except Exception as exc:
-        message = str(exc)
-        repository.upsert_sonar_run(
-            data_source_id=data_source_id,
-            project_key=project_key,
-            commit_sha=commit_sha,
-            job_id=job_id,
-            status="failed",
-            message=message,
-            sonar_instance=instance.name,
-            sonar_host=instance.host,
-        )
-        # Increment processed count even on failure to avoid infinite loop
-        updated_job = repository.update_job(
-            job_id,
-            processed_delta=1,
-            status="running",
-            last_error=message,
-            current_commit=None,
-        )
-        # Check if job is complete (all commits processed)
-        job_finished = bool(
-            updated_job
-            and updated_job.get("processed", 0) >= updated_job.get("total", 0)
-        )
-        if job_finished:
-            # Mark job as failed since at least one commit failed
-            repository.update_job(job_id, status="failed")
-            repository.update_data_source(data_source_id, status="failed")
+        message = str(exc).lower()
+        if "not found" in message and "commit" in message:
+            exc = PermanentScanError(str(exc))
+        return _handle_scan_failure(self, job, project, exc)
 
-        repository.insert_dead_letter(
-            payload={
-                "job_id": job_id,
-                "data_source_id": data_source_id,
-                "commit": commit,
-                "error": message,
-            },
-            reason="sonar-commit",
-        )
-        logger.exception("Commit %s failed", commit_sha)
-        raise
-
-    if result.skipped:
-        update_kwargs = {
-            "data_source_id": data_source_id,
-            "project_key": project_key,
-            "commit_sha": commit_sha,
-            "job_id": job_id,
-            "status": "skipped",
-            "log_path": str(result.log_path),
-            "message": result.output,
-            "component_key": result.component_key,
-            "sonar_instance": result.instance_name,
-            "sonar_host": instance.host,
-        }
-        if result.s3_log_key:
-            update_kwargs["s3_log_key"] = result.s3_log_key
-
-        repository.upsert_sonar_run(**update_kwargs)
-        try:
-            export_metrics.delay(result.component_key, job_id, data_source_id)
-            logger.info(
-                "Queued export_metrics for existing component %s (job=%s, data_source=%s)",
-                result.component_key,
-                job_id,
-                data_source_id,
-            )
-        except Exception:
-            logger.exception(
-                "Failed to enqueue export_metrics for component %s",
-                result.component_key,
-            )
-    else:
-        update_kwargs = {
-            "data_source_id": data_source_id,
-            "project_key": project_key,
-            "commit_sha": commit_sha,
-            "job_id": job_id,
-            "status": "submitted",
-            "log_path": str(result.log_path),
-            "component_key": result.component_key,
-            "sonar_instance": result.instance_name,
-            "sonar_host": instance.host,
-        }
-        if result.s3_log_key:
-            update_kwargs["s3_log_key"] = result.s3_log_key
-
-        repository.upsert_sonar_run(**update_kwargs)
-
-    updated_job = repository.update_job(
-        job_id,
-        processed_delta=1,
-        current_commit=None,
+    repository.update_scan_job(
+        job["id"],
+        component_key=result.component_key,
+        sonar_task_id=result.component_key,
+        last_error=None,
+        last_finished_at=datetime.utcnow(),
+        s3_log_key=result.s3_log_key,
     )
-    job_finished = bool(
-        updated_job and updated_job.get("processed", 0) >= updated_job.get("total", 0)
-    )
-    if job_finished:
-        repository.update_job(job_id, status="succeeded")
-        repository.update_data_source(data_source_id, status="ready")
-
     logger.info(
-        "Processed commit %s on %s (component %s)",
-        commit_sha,
-        instance.name,
+        "Queued metrics export for scan job %s (component=%s)",
+        job["id"],
         result.component_key,
     )
-    return result.component_key, job_finished
-
-
-@celery_app.task(
-    bind=True,
-    autoretry_for=(Exception,),
-)
-def run_commit_scan(
-    self, job_id: str, data_source_id: str, commit: Dict[str, str]
-) -> str:
-    """Run SonarQube scan for a single commit."""
-    project_key = commit.get("project_key")
-    commit_sha = commit.get("commit_sha")
-
-    if not project_key:
-        raise ValueError("Commit payload missing project_key")
-
-    instance = settings.sonarqube.get_instance()
-    runner = get_runner_for_instance(project_key, instance.name)
-    repository.update_job(job_id, sonar_instance=instance.name)
-
-    data_source = repository.get_data_source(data_source_id)
-    default_config_path = None
-    if data_source:
-        default_config_path = (data_source.get("sonar_config") or {}).get("file_path")
-
-    override_text = commit.get("config_override")
-    if override_text:
-        config_path = runner.ensure_override_config(override_text)
-    else:
-        config_path = default_config_path
-
-    logger.info(
-        f"Processing commit '{commit_sha}' on instance '{instance.name}' (job '{job_id}')"
+    export_metrics.delay(
+        result.component_key,
+        job_id=job["id"],
+        project_id=project["id"],
+        commit_sha=job.get("commit_sha"),
     )
-
-    component_key, job_finished = process_commit(
-        job_id,
-        data_source_id,
-        commit,
-        runner,
-        config_path=config_path,
-    )
-
-    logger.info(
-        f"Successfully processed commit '{commit_sha}' on instance '{instance.name}' "
-        f"(component: {component_key}, job_finished: {job_finished})"
-    )
-
-    return component_key
+    return result.component_key
 
 
-@celery_app.task(
-    bind=True,
-    autoretry_for=(Exception,),
-)
+@celery_app.task(bind=True, autoretry_for=(Exception,), max_retries=5)
 def export_metrics(
     self,
     component_key: str,
-    job_id: Optional[str] = None,
-    data_source_id: Optional[str] = None,
+    *,
+    job_id: str,
+    project_id: str,
     analysis_id: Optional[str] = None,
-) -> str:
-    run_doc = repository.find_sonar_run_by_component(component_key)
-    logger.info(
-        "Exporting metrics for component_key=%s, run_doc=%s", component_key, run_doc
-    )
-    if run_doc:
-        instance = settings.sonarqube.get_instance(run_doc.get("sonar_instance"))
-        target_job_id = job_id or run_doc.get("job_id") or "ad-hoc"
-        target_ds = data_source_id or run_doc.get("data_source_id")
-        project_key = run_doc.get("project_key", "unknown")
-        commit_sha = run_doc.get("commit_sha")
-    else:
-        instance = settings.sonarqube.get_instance()
-        target_job_id = job_id or "ad-hoc"
-        target_ds = data_source_id
-        parts = component_key.rsplit("_", 1)
-        project_key = parts[0] if len(parts) > 1 else component_key
-        commit_sha = parts[1] if len(parts) > 1 else None
+    commit_sha: Optional[str] = None,
+) -> Dict[str, str]:
+    job = repository.get_scan_job(job_id)
+    if not job:
+        raise ValueError(f"Scan job {job_id} not found for export")
+    project = repository.get_project(project_id)
+    if not project:
+        raise ValueError(f"Project {project_id} missing for export")
 
+    instance = settings.sonarqube.get_instance(job.get("sonar_instance"))
     exporter = MetricsExporter.from_instance(instance)
+    metrics = exporter.collect_metrics(component_key)
+    if not metrics:
+        raise RuntimeError(f"No metrics available for {component_key}")
 
-    destination = _build_metrics_destination(project_key, target_job_id, target_ds)
-
-    measures, record_count = exporter.append_commit_metrics(
-        component_key, destination, commit_sha
+    repository.upsert_scan_result(
+        project_id=project_id,
+        job_id=job_id,
+        sonar_project_key=component_key,
+        sonar_analysis_id=analysis_id or job.get("sonar_analysis_id") or "",
+        metrics=metrics,
     )
 
-    if not measures:
-        logger.warning(f"No measures exported for {component_key}")
-        return str(destination)
-
-    repo_name: Optional[str] = None
-    data_source = repository.get_data_source(target_ds) if target_ds else None
-    if data_source:
-        stats = data_source.get("stats") or {}
-        repo_name = stats.get("project_name") or data_source.get("name")
-
-    # Create or update output record
-    if target_job_id:
-        existing_output = repository.find_output_by_job_and_path(
-            target_job_id, str(destination)
-        )
-        if existing_output:
-            # Update existing output with new record count
-            update_kwargs = {
-                "metrics": list(measures.keys()),
-                "record_count": record_count,
-                "project_key": project_key,
-            }
-            resolved_repo_name = repo_name or existing_output.get("repo_name")
-            if resolved_repo_name:
-                update_kwargs["repo_name"] = resolved_repo_name
-            if target_ds:
-                update_kwargs["data_source_id"] = target_ds
-            repository.update_output(existing_output["id"], **update_kwargs)
-        else:
-            add_kwargs = {
-                "job_id": target_job_id,
-                "path": str(destination),
-                "metrics": list(measures.keys()),
-                "record_count": record_count,
-                "project_key": project_key,
-            }
-            if target_ds:
-                add_kwargs["data_source_id"] = target_ds
-            if repo_name:
-                add_kwargs["repo_name"] = repo_name
-            repository.add_output(**add_kwargs)
-
-    if target_ds:
-        repository.upsert_sonar_run(
-            data_source_id=target_ds,
-            project_key=project_key,
-            commit_sha=commit_sha,
-            job_id=target_job_id,
-            status="succeeded",
-            analysis_id=analysis_id,
-            metrics_path=str(destination),
-            component_key=component_key,
-            sonar_instance=instance.name,
-            sonar_host=instance.host,
-        )
-
+    repository.update_scan_job(
+        job_id,
+        status=ScanJobStatus.success.value,
+        last_error=None,
+        last_finished_at=datetime.utcnow(),
+        sonar_analysis_id=analysis_id or job.get("sonar_analysis_id"),
+    )
+    repository.update_project(project_id, processed_delta=1)
+    _check_project_completion(project_id)
     logger.info(
-        "Metrics for %s appended to %s (total records: %d)",
+        "Stored metrics for component %s (job=%s, project=%s)",
         component_key,
-        destination,
-        record_count,
+        job_id,
+        project_id,
     )
-    return str(destination)
+    return metrics
+
+
+@celery_app.task()
+def reconcile_scan_jobs() -> dict:
+    now = datetime.utcnow()
+    stalled = repository.find_stalled_scan_jobs(
+        running_stale_before=now - timedelta(minutes=15),
+        pending_before=now - timedelta(minutes=30),
+        limit=200,
+    )
+    requeued = 0
+    for job in stalled:
+        repository.update_scan_job(
+            job["id"],
+            status=ScanJobStatus.pending.value,
+            last_worker_id=None,
+        )
+        run_scan_job.delay(job["id"])
+        requeued += 1
+    if requeued:
+        logger.info("Requeued %d stalled scan jobs", requeued)
+    return {"requeued": requeued}
+
+
+@celery_app.on_after_configure.connect
+def setup_periodic_tasks(sender, **kwargs):
+    sender.add_periodic_task(
+        600.0, reconcile_scan_jobs.s(), name="requeue-stalled-scan-jobs"
+    )

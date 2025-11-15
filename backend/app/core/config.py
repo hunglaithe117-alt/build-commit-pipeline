@@ -14,7 +14,6 @@ from pydantic import BaseModel, Field
 class PathsSettings(BaseModel):
     uploads: Path = Field(default=Path("/app/data/uploads"))
     exports: Path = Field(default=Path("/app/data/exports"))
-    dead_letter: Path = Field(default=Path("/app/data/dead_letter"))
     default_workdir: Path = Field(default=Path("/app/data/sonar-work"))
 
 
@@ -77,11 +76,10 @@ class SonarSettings(BaseModel):
 
 
 class StorageCollections(BaseModel):
-    data_sources_collection: str = Field(default="data_sources")
-    jobs_collection: str = Field(default="jobs")
-    sonar_runs_collection: str = Field(default="sonar_runs")
-    dead_letter_collection: str = Field(default="dead_letters")
-    outputs_collection: str = Field(default="outputs")
+    projects_collection: str = Field(default="projects")
+    scan_jobs_collection: str = Field(default="scan_jobs")
+    scan_results_collection: str = Field(default="scan_results")
+    failed_commits_collection: str = Field(default="failed_commits")
 
 
 class WebSettings(BaseModel):

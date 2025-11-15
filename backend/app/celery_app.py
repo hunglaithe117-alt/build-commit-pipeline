@@ -26,8 +26,8 @@ celery_app.conf.update(
     task_default_max_retries=3,
     task_routes={
         "app.tasks.sonar.export_metrics": {"queue": "pipeline.exports"},
-        "app.tasks.sonar.run_commit_scan": {"queue": "pipeline.scan"},
-        "app.tasks.ingestion.ingest_data_source": {"queue": "pipeline.ingest"},
+        "app.tasks.sonar.run_scan_job": {"queue": "pipeline.scan"},
+        "app.tasks.ingestion.ingest_project": {"queue": "pipeline.ingest"},
     },
 )
 

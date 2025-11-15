@@ -113,7 +113,7 @@ storage:
   data_sources_collection: data_sources
   jobs_collection: jobs
   sonar_runs_collection: sonar_runs
-  dead_letter_collection: dead_letters
+  failed_commits_collection: failed_commits
   outputs_collection: outputs
 web:
   base_url: http://localhost:3000

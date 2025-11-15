@@ -1,42 +1,41 @@
-export type CSVSummary = {
-  project_name?: string | null;
-  project_key?: string | null;
-  total_builds: number;
-  total_commits: number;
-  unique_branches: number;
-  first_commit?: string | null;
-  last_commit?: string | null;
-};
-
 export type SonarConfig = {
-  content: string;
-  source: string;
-  filename?: string | null;
+  filename: string;
+  file_path: string;
   updated_at?: string;
 };
 
-export type DataSource = {
+export type Project = {
   id: string;
-  name: string;
-  filename: string;
+  project_name: string;
+  project_key: string;
+  total_builds: string;
+  total_commits: string;
+  processed_commits: number;
+  failed_commits: number;
   status: string;
-  file_path: string;
-  stats?: CSVSummary;
+  source_filename?: string | null;
+  source_path?: string | null;
   created_at: string;
   updated_at: string;
   sonar_config?: SonarConfig | null;
 };
 
-export type Job = {
+export type ScanJob = {
   id: string;
-  data_source_id: string;
+  project_id: string;
+  project_key?: string | null;
+  commit_sha: string;
   status: string;
-  processed: number;
-  total: number;
-  failed_count?: number;
+  retry_count: number;
+  max_retries: number;
   last_error?: string | null;
-  current_commit?: string | null;
   sonar_instance?: string | null;
+  sonar_analysis_id?: string | null;
+  component_key?: string | null;
+  config_override?: string | null;
+  config_source?: string | null;
+  repository_url?: string | null;
+  repo_slug?: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -64,46 +63,14 @@ export type WorkersStats = {
   error?: string;
 };
 
-export type SonarRun = {
-  id: string;
-  data_source_id: string;
-  project_key: string;
-  commit_sha?: string | null;
-  job_id?: string | null;
-  component_key?: string | null;
-  sonar_instance?: string | null;
-  sonar_host?: string | null;
-  status: string;
-  analysis_id?: string | null;
-  metrics_path?: string | null;
-  log_path?: string | null;
-  message?: string | null;
-  started_at: string;
-  finished_at?: string | null;
-};
-
-export type OutputDataset = {
+export type ScanResult = {
   id: string;
   job_id: string;
-  data_source_id?: string | null;
-  project_key?: string | null;
-  repo_name?: string | null;
-  path: string;
-  record_count: number;
-  metrics: string[];
+  project_id: string;
+  sonar_project_key: string;
+  sonar_analysis_id: string;
+  metrics: Record<string, string>;
   created_at: string;
-};
-
-export type DeadLetter = {
-  id: string;
-  payload: Record<string, any>;
-  reason: string;
-  status: string;
-  config_override?: string | null;
-  config_source?: string | null;
-  created_at: string;
-  updated_at?: string | null;
-  resolved_at?: string | null;
 };
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
@@ -136,91 +103,89 @@ function buildPath(path: string, qs?: Record<string, any>) {
 }
 
 export const api = {
-  listDataSources: (limit?: number) => apiFetch<DataSource[]>(buildPath("/api/data-sources", { limit })),
-  listDataSourcesPaginated: (
+  listProjects: (limit?: number) => apiFetch<Project[]>(buildPath("/api/projects", { limit })),
+  listProjectsPaginated: (
     page?: number,
     pageSize?: number,
     sortBy?: string,
     sortDir?: string,
     filters?: Record<string, any>
   ) =>
-    apiFetch<{ items: DataSource[]; total: number }>(
-      buildPath("/api/data-sources", { page: page ?? 1, page_size: pageSize, sort_by: sortBy, sort_dir: sortDir, filters: filters ? JSON.stringify(filters) : undefined })
+    apiFetch<{ items: Project[]; total: number }>(
+      buildPath("/api/projects", {
+        page: page ?? 1,
+        page_size: pageSize,
+        sort_by: sortBy,
+        sort_dir: sortDir,
+        filters: filters ? JSON.stringify(filters) : undefined,
+      })
     ),
-  getDataSource: (id: string) => apiFetch<DataSource>(`/api/data-sources/${id}`),
-  uploadDataSource: async (file: File, name: string, _options?: { configContent?: string; configSource?: string; configFilename?: string }) => {
+  getProject: (id: string) => apiFetch<Project>(`/api/projects/${id}`),
+  uploadProject: async (file: File, name: string, options?: { sonarConfig?: File }) => {
     const formData = new FormData();
     formData.append("name_form", name);
-    // Only file-based sonar.properties uploads are supported from the UI.
     formData.append("file", file);
-    const response = await fetch(`${API_BASE_URL}/api/data-sources`, {
+    if (options?.sonarConfig) {
+      formData.append("sonar_config_file", options.sonarConfig);
+    }
+    const response = await fetch(`${API_BASE_URL}/api/projects`, {
       method: "POST",
       body: formData,
     });
     if (!response.ok) {
       throw new Error(await response.text());
     }
-    return (await response.json()) as DataSource;
+    return (await response.json()) as Project;
   },
-  updateDataSourceConfig: (id: string, payload: { content: string; source?: string; filename?: string | null }) =>
-    apiFetch<DataSource>(`/api/data-sources/${id}/config`, {
-      method: "PUT",
-      body: JSON.stringify(payload),
-    }),
-  triggerCollection: (id: string) => apiFetch(`/api/data-sources/${id}/collect`, { method: "POST" }),
-  listJobs: (limit?: number) => apiFetch<Job[]>(buildPath("/api/jobs", { limit })),
-  listJobsPaginated: (
+  updateProjectConfig: async (id: string, file: File) => {
+    const formData = new FormData();
+    formData.append("config_file", file);
+    const response = await fetch(`${API_BASE_URL}/api/projects/${id}/config`, {
+      method: "POST",
+      body: formData,
+    });
+    if (!response.ok) {
+      throw new Error(await response.text());
+    }
+    return (await response.json()) as Project;
+  },
+  triggerCollection: (id: string) => apiFetch(`/api/projects/${id}/collect`, { method: "POST" }),
+  listScanJobsPaginated: (
     page?: number,
     pageSize?: number,
     sortBy?: string,
     sortDir?: string,
     filters?: Record<string, any>
   ) =>
-    apiFetch<{ items: Job[]; total: number }>(
-      buildPath("/api/jobs", { page: page ?? 1, page_size: pageSize, sort_by: sortBy, sort_dir: sortDir, filters: filters ? JSON.stringify(filters) : undefined })
+    apiFetch<{ items: ScanJob[]; total: number }>(
+      buildPath("/api/scan-jobs", {
+        page: page ?? 1,
+        page_size: pageSize,
+        sort_by: sortBy,
+        sort_dir: sortDir,
+        filters: filters ? JSON.stringify(filters) : undefined,
+      })
     ),
-  getWorkersStats: () => apiFetch<WorkersStats>("/api/jobs/workers-stats"),
-  listRuns: (limit?: number) => apiFetch<SonarRun[]>(buildPath("/api/sonar/runs", { limit })),
-  listRunsPaginated: (
-    page?: number,
-    pageSize?: number,
-    sortBy?: string,
-    sortDir?: string,
-    filters?: Record<string, any>
-  ) =>
-    apiFetch<{ items: SonarRun[]; total: number }>(
-      buildPath("/api/sonar/runs", { page: page ?? 1, page_size: pageSize, sort_by: sortBy, sort_dir: sortDir, filters: filters ? JSON.stringify(filters) : undefined })
-    ),
-  listOutputs: (limit?: number) => apiFetch<OutputDataset[]>(buildPath("/api/outputs", { limit })),
-  listOutputsPaginated: (
-    page?: number,
-    pageSize?: number,
-    sortBy?: string,
-    sortDir?: string,
-    filters?: Record<string, any>
-  ) =>
-    apiFetch<{ items: OutputDataset[]; total: number }>(
-      buildPath("/api/outputs", { page: page ?? 1, page_size: pageSize, sort_by: sortBy, sort_dir: sortDir, filters: filters ? JSON.stringify(filters) : undefined })
-    ),
-  listDeadLetters: (limit?: number) => apiFetch<DeadLetter[]>(buildPath("/api/dead-letters", { limit })),
-  listDeadLettersPaginated: (
-    page?: number,
-    pageSize?: number,
-    sortBy?: string,
-    sortDir?: string,
-    filters?: Record<string, any>
-  ) =>
-    apiFetch<{ items: DeadLetter[]; total: number }>(
-      buildPath("/api/dead-letters", { page: page ?? 1, page_size: pageSize, sort_by: sortBy, sort_dir: sortDir, filters: filters ? JSON.stringify(filters) : undefined })
-    ),
-  updateDeadLetter: (id: string, payload: { config_override: string; config_source?: string }) =>
-    apiFetch<DeadLetter>(`/api/dead-letters/${id}`, {
-      method: "PUT",
-      body: JSON.stringify(payload),
-    }),
-  retryDeadLetter: (id: string, payload: { config_override?: string; config_source?: string }) =>
-    apiFetch<DeadLetter>(`/api/dead-letters/${id}/retry`, {
+  getWorkersStats: () => apiFetch<WorkersStats>("/api/scan-jobs/workers-stats"),
+  retryScanJob: (id: string, payload: { config_override?: string; config_source?: string }) =>
+    apiFetch<ScanJob>(`/api/scan-jobs/${id}/retry`, {
       method: "POST",
       body: JSON.stringify(payload),
     }),
+  listScanResultsPaginated: (
+    page?: number,
+    pageSize?: number,
+    sortBy?: string,
+    sortDir?: string,
+    filters?: Record<string, any>
+  ) =>
+    apiFetch<{ items: ScanResult[]; total: number }>(
+      buildPath("/api/scan-results", {
+        page: page ?? 1,
+        page_size: pageSize,
+        sort_by: sortBy,
+        sort_dir: sortDir,
+        filters: filters ? JSON.stringify(filters) : undefined,
+      })
+    ),
 };

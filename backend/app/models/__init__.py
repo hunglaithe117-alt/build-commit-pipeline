@@ -1,23 +1,23 @@
 """Pydantic schemas used by the API."""
 
 from .schemas import (
-    CSVSummary,
-    DataSource,
-    DataSourceStatus,
-    DeadLetter,
-    Job,
-    JobStatus,
-    OutputDataset,
-    SonarRun,
+    FailedCommit,
+    Project,
+    ProjectStatus,
+    ScanJob,
+    ScanJobStatus,
+    ScanMetrics,
+    ScanResult,
+    SonarConfig,
 )
 
 __all__ = [
-    "CSVSummary",
-    "DataSource",
-    "DataSourceStatus",
-    "DeadLetter",
-    "Job",
-    "JobStatus",
-    "OutputDataset",
-    "SonarRun",
+    "FailedCommit",
+    "Project",
+    "ProjectStatus",
+    "ScanJob",
+    "ScanJobStatus",
+    "ScanMetrics",
+    "ScanResult",
+    "SonarConfig",
 ]

@@ -2,29 +2,24 @@ import Link from "next/link";
 
 const sections = [
   {
-    title: "Quản lý nguồn dữ liệu",
-    description: "Tải file CSV TravisTorrent, cấu hình sonar.properties và khởi chạy pipeline.",
-    href: "/data-sources",
+    title: "Quản lý project",
+    description: "Tải CSV TravisTorrent, cấu hình sonar.properties và khởi chạy pipeline.",
+    href: "/projects",
   },
   {
-    title: "Job thu thập",
-    description: "Giám sát tiến độ các data job, số commit đã xử lý và trạng thái retry.",
+    title: "Scan jobs",
+    description: "Giám sát trạng thái commit, số lần retry và worker đang chạy.",
     href: "/jobs",
   },
   {
-    title: "SonarQube",
-    description: "Quan sát lịch sử quét, trạng thái webhook và lần export gần nhất.",
+    title: "Kết quả quét",
+    description: "Xem metrics thu thập được từ SonarQube cho từng commit.",
     href: "/sonar-runs",
   },
   {
-    title: "Dữ liệu đầu ra",
-    description: "Xem metrics đã thu thập và tải nhanh các tập dữ liệu enriched.",
-    href: "/outputs",
-  },
-  {
-    title: "Deadletter commits",
-    description: "Theo dõi commit lỗi, tinh chỉnh cấu hình sonar và retry từng commit.",
-    href: "/dead-letters",
+    title: "Failed commits",
+    description: "Xem và retry các commit FAILED_PERMANENT với cấu hình tuỳ chỉnh.",
+    href: "/failed-commits",
   },
 ];
 
