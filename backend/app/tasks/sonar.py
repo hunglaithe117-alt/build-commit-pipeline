@@ -175,7 +175,6 @@ def run_scan_job(self, scan_job_id: str) -> str:
     repository.update_scan_job(
         job["id"],
         component_key=result.component_key,
-        sonar_task_id=result.component_key,
         last_error=None,
         last_finished_at=datetime.utcnow(),
         s3_log_key=result.s3_log_key,

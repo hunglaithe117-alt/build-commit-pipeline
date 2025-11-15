@@ -4,7 +4,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Dict, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 
 class ProjectStatus(str, Enum):
@@ -52,7 +52,6 @@ class ScanJob(BaseModel):
     max_retries: int = 5
     last_error: Optional[str] = None
     last_worker_id: Optional[str] = None
-    sonar_task_id: Optional[str] = None
     sonar_analysis_id: Optional[str] = None
     created_at: datetime
     updated_at: datetime
