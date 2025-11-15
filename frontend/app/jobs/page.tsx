@@ -15,6 +15,7 @@ export default function ScanJobsPage() {
   const [error, setError] = useState<string | null>(null);
   const [pageIndex, setPageIndex] = useState(0);
   const [total, setTotal] = useState(0);
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
   const loadPage = async (params: {
     pageIndex: number;
@@ -50,9 +51,16 @@ export default function ScanJobsPage() {
     }
   };
 
-  const handleManualRefresh = () => {
-    loadPage({ pageIndex, pageSize: 20, sorting: null, filters: {} }).catch(() => null);
-    refreshWorkers();
+  const handleManualRefresh = async () => {
+    try {
+      setIsRefreshing(true);
+      await Promise.all([
+        loadPage({ pageIndex, pageSize: 20, sorting: null, filters: {} }),
+        refreshWorkers(),
+      ]);
+    } finally {
+      setIsRefreshing(false);
+    }
   };
 
   useEffect(() => {
@@ -140,8 +148,8 @@ export default function ScanJobsPage() {
       <Card>
         <CardHeader className="flex flex-row items-center justify-between">
           <CardTitle className="text-xl">Scan jobs</CardTitle>
-          <Button variant="outline" size="sm" onClick={handleManualRefresh}>
-            Refresh
+          <Button variant="outline" size="sm" onClick={handleManualRefresh} disabled={isRefreshing}>
+            {isRefreshing ? "Refreshing..." : "Refresh"}
           </Button>
         </CardHeader>
         <CardContent>
