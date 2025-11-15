@@ -58,6 +58,9 @@ class Repository:
     def find_stalled_scan_jobs(self, *a, **k):
         return self.scan_jobs.find_stalled_jobs(*a, **k)
 
+    def list_scan_jobs_by_status(self, *a, **k):
+        return self.scan_jobs.list_jobs_by_status(*a, **k)
+
     # Scan results
     def upsert_scan_result(self, *a, **k):
         return self.scan_results.upsert_result(*a, **k)

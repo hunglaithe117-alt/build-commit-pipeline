@@ -18,11 +18,6 @@ class PermanentScanError(Exception):
     """Raised when a scan failure should not be retried."""
 
 
-def _retry_backoff(attempt: int) -> int:
-    """Simple exponential backoff capped at 10 minutes."""
-    return min(60 * attempt, 600)
-
-
 def _safe_int(value: Optional[str | int]) -> int:
     try:
         return int(value) if value is not None else 0
@@ -108,7 +103,7 @@ def _handle_scan_failure(
         max_retries,
         message,
     )
-    raise task.retry(exc=exc, countdown=_retry_backoff(retry_count))
+    raise task.retry(exc=exc, countdown=0)
 
 
 @celery_app.task(bind=True, max_retries=None)
@@ -151,7 +146,11 @@ def run_scan_job(self, scan_job_id: str) -> str:
     sonar_config = (project.get("sonar_config") or {}).get("file_path")
     project_key = job.get("project_key") or project.get("project_key")
     runner = get_runner_for_instance(project_key)
-    repository.update_scan_job(job["id"], sonar_instance=runner.instance.name)
+    repository.update_scan_job(
+        job["id"],
+        sonar_instance=runner.instance.name,
+        status=ScanJobStatus.running.value,
+    )
 
     override_text = job.get("config_override")
     if override_text:
@@ -179,17 +178,7 @@ def run_scan_job(self, scan_job_id: str) -> str:
         last_finished_at=datetime.utcnow(),
         s3_log_key=result.s3_log_key,
     )
-    logger.info(
-        "Queued metrics export for scan job %s (component=%s)",
-        job["id"],
-        result.component_key,
-    )
-    export_metrics.delay(
-        result.component_key,
-        job_id=job["id"],
-        project_id=project["id"],
-        commit_sha=job.get("commit_sha"),
-    )
+
     return result.component_key
 
 

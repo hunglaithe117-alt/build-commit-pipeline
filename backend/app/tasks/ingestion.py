@@ -26,12 +26,13 @@ def ingest_project(self, project_id: str) -> dict:
     if not source_path:
         raise ValueError(f"Project {project_id} missing source_path for ingestion")
 
-    repository.update_project(project_id, status=ProjectStatus.processing.value)
     csv_path = Path(source_path)
     pipeline = CSVIngestionPipeline(csv_path)
     summary = pipeline.summarise()
+
     repository.update_project(
         project_id,
+        status=ProjectStatus.processing.value,
         total_builds=summary.get("total_builds", 0),
         total_commits=summary.get("total_commits", 0),
     )

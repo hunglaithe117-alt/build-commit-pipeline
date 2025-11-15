@@ -11,7 +11,8 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { api, Project } from "@/lib/api";
+import { api, Project, TriggerCollectionResult } from "@/lib/api";
+import { cn } from "@/lib/utils";
 
 export default function ProjectsPage() {
   const [projects, setProjects] = useState<Project[]>([]);
@@ -19,9 +20,27 @@ export default function ProjectsPage() {
   const [sonarConfigFile, setSonarConfigFile] = useState<File | null>(null);
   const [name, setName] = useState("");
   const [loading, setLoading] = useState(false);
-  const [message, setMessage] = useState<string | null>(null);
   const [pageIndex, setPageIndex] = useState(0);
   const [total, setTotal] = useState(0);
+  const [notification, setNotification] = useState<{
+    type: "success" | "error";
+    text: string;
+  } | null>(null);
+
+  const showNotification = useCallback(
+    (type: "success" | "error", text: string) => {
+      setNotification({ type, text });
+    },
+    []
+  );
+
+  useEffect(() => {
+    if (!notification) {
+      return;
+    }
+    const timer = setTimeout(() => setNotification(null), 4000);
+    return () => clearTimeout(timer);
+  }, [notification]);
 
   const refresh = useCallback(async () => {
     const res = await api.listProjectsPaginated(pageIndex + 1, 20);
@@ -30,8 +49,8 @@ export default function ProjectsPage() {
   }, [pageIndex]);
 
   useEffect(() => {
-    refresh().catch((err) => setMessage(err.message));
-  }, [refresh]);
+    refresh().catch((err) => showNotification("error", err.message));
+  }, [refresh, showNotification]);
 
   const totals = useMemo(() => {
     return projects.reduce(
@@ -64,14 +83,14 @@ export default function ProjectsPage() {
       setTotal(res.total || 0);
       setPageIndex(params.pageIndex);
     } catch (err: any) {
-      setMessage(err.message);
+      showNotification("error", err.message);
     }
   };
 
   const handleUpload = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!file) {
-      setMessage("Chọn file CSV trước khi tải lên");
+      showNotification("error", "Chọn file CSV trước khi tải lên");
       return;
     }
     setLoading(true);
@@ -83,10 +102,13 @@ export default function ProjectsPage() {
       setName("");
       setFile(null);
       setSonarConfigFile(null);
-      setMessage("Upload thành công, file đang được xử lý");
+      showNotification(
+        "success",
+        "Upload thành công, pipeline đang xử lý commits"
+      );
       await refresh();
     } catch (error: any) {
-      setMessage(error.message);
+      showNotification("error", error.message);
     } finally {
       setLoading(false);
     }
@@ -94,15 +116,22 @@ export default function ProjectsPage() {
 
   const triggerJob = useCallback(
     async (id: string) => {
-      setMessage(null);
       try {
-        await api.triggerCollection(id);
-        setMessage("Đã queue pipeline xử lý commits");
+        const result: TriggerCollectionResult = await api.triggerCollection(id);
+        if (result?.status === "retrying_failed") {
+          showNotification(
+            "success",
+            `Đã queue lại ${result.count ?? 0} commit lỗi`
+          );
+        } else {
+          showNotification("success", "Đã queue pipeline xử lý commits");
+        }
+        await refresh();
       } catch (error: any) {
-        setMessage(error.message);
+        showNotification("error", error.message);
       }
     },
-    []
+    [refresh, showNotification]
   );
 
   const columns = useMemo<ColumnDef<Project>[]>(() => {
@@ -110,7 +139,9 @@ export default function ProjectsPage() {
       {
         accessorKey: "project_name",
         header: "Tên",
-        cell: ({ row }) => <span className="font-semibold">{row.original.project_name}</span>,
+        cell: ({ row }) => (
+          <span className="font-semibold">{row.original.project_name}</span>
+        ),
       },
       {
         accessorKey: "project_key",
@@ -131,8 +162,15 @@ export default function ProjectsPage() {
         header: "Tiến độ",
         meta: { className: "text-right", cellClassName: "text-right" },
         cell: ({ row }) => {
-          const processed = row.original.processed_commits ?? 0;
-          const failed = row.original.failed_commits ?? 0;
+          const total = Number(row.original.total_commits ?? 0);
+          const processed = Math.min(
+            row.original.processed_commits ?? 0,
+            total
+          );
+          const failed = Math.min(
+            row.original.failed_commits ?? 0,
+            Math.max(total - processed, 0)
+          );
           return (
             <div className="text-right text-sm">
               <div>{processed} đã quét</div>
@@ -155,7 +193,18 @@ export default function ProjectsPage() {
             <Button size="sm" variant="ghost" asChild>
               <Link href={`/projects/${row.original.id}`}>Chi tiết</Link>
             </Button>
-            <Button size="sm" variant="outline" onClick={() => triggerJob(row.original.id)}>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={
+                !(
+                  row.original.status === "pending" ||
+                  (row.original.status === "finished" &&
+                    (row.original.failed_commits ?? 0) > 0)
+                )
+              }
+              onClick={() => triggerJob(row.original.id)}
+            >
               Thu thập
             </Button>
           </div>
@@ -165,59 +214,103 @@ export default function ProjectsPage() {
   }, [triggerJob]);
 
   return (
-    <section className="space-y-8">
-      <div className="grid gap-4 md:grid-cols-3">
-        <MetricCard label="Số project" value={projects.length} hint="CSV đã upload" />
-        <MetricCard label="Tổng builds" value={totals.builds} />
-        <MetricCard label="Tổng commits" value={totals.commits} />
-      </div>
-
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-xl">Tải CSV TravisTorrent</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <form className="grid gap-4 md:grid-cols-3" onSubmit={handleUpload}>
-            <div className="space-y-2">
-              <Label htmlFor="csv-upload">File CSV</Label>
-              <Input id="csv-upload" type="file" accept=".csv" onChange={(event) => setFile(event.target.files?.[0] || null)} />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="dataset-name">Tên hiển thị</Label>
-              <Input id="dataset-name" type="text" placeholder="Ví dụ: angularjs-commits" value={name} onChange={(event) => setName(event.target.value)} />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="sonar-config">sonar.properties (tùy chọn)</Label>
-              <Input id="sonar-config" type="file" accept=".properties" onChange={(event) => setSonarConfigFile(event.target.files?.[0] || null)} />
-            </div>
-            <div className="md:col-span-3">
-              <Button type="submit" disabled={loading}>
-                {loading ? "Đang tải..." : "Upload"}
-              </Button>
-            </div>
-          </form>
-          {message && <p className="mt-4 text-sm text-slate-700">{message}</p>}
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-xl">Danh sách project</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <DataTable
-            columns={columns}
-            data={projects}
-            serverPagination={{
-              pageIndex,
-              pageSize: 20,
-              total,
-              onPageChange: (next) => setPageIndex(next),
-            }}
-            serverOnChange={handleServerChange}
+    <>
+      {notification && (
+        <div
+          className={cn(
+            "fixed right-4 top-4 z-50 flex max-w-sm items-start gap-3 rounded-md px-4 py-3 text-sm shadow-lg",
+            notification.type === "success"
+              ? "bg-emerald-600 text-white"
+              : "bg-red-600 text-white"
+          )}
+        >
+          <div>{notification.text}</div>
+          <button
+            type="button"
+            className="ml-auto text-white/80 transition hover:text-white"
+            onClick={() => setNotification(null)}
+          >
+            ×
+          </button>
+        </div>
+      )}
+      <section className="space-y-8">
+        <div className="grid gap-4 md:grid-cols-3">
+          <MetricCard
+            label="Số project"
+            value={projects.length}
+            hint="CSV đã upload"
           />
-        </CardContent>
-      </Card>
-    </section>
+          <MetricCard label="Tổng builds" value={totals.builds} />
+          <MetricCard label="Tổng commits" value={totals.commits} />
+        </div>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-xl">Tải CSV TravisTorrent</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <form className="grid gap-4 md:grid-cols-3" onSubmit={handleUpload}>
+              <div className="space-y-2">
+                <Label htmlFor="csv-upload">File CSV</Label>
+                <Input
+                  id="csv-upload"
+                  type="file"
+                  accept=".csv"
+                  onChange={(event) => setFile(event.target.files?.[0] || null)}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="dataset-name">Tên hiển thị</Label>
+                <Input
+                  id="dataset-name"
+                  type="text"
+                  placeholder="Ví dụ: angularjs-commits"
+                  value={name}
+                  onChange={(event) => setName(event.target.value)}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="sonar-config">
+                  sonar.properties (tùy chọn)
+                </Label>
+                <Input
+                  id="sonar-config"
+                  type="file"
+                  accept=".properties"
+                  onChange={(event) =>
+                    setSonarConfigFile(event.target.files?.[0] || null)
+                  }
+                />
+              </div>
+              <div className="md:col-span-3">
+                <Button type="submit" disabled={loading}>
+                  {loading ? "Đang tải..." : "Upload"}
+                </Button>
+              </div>
+            </form>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-xl">Danh sách project</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <DataTable
+              columns={columns}
+              data={projects}
+              serverPagination={{
+                pageIndex,
+                pageSize: 20,
+                total,
+                onPageChange: (next) => setPageIndex(next),
+              }}
+              serverOnChange={handleServerChange}
+            />
+          </CardContent>
+        </Card>
+      </section>
+    </>
   );
 }

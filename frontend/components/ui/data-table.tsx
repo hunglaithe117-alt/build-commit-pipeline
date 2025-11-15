@@ -97,6 +97,10 @@ export function DataTable<TData, TValue>({
     getSortedRowModel: getSortedRowModel(),
     getFilteredRowModel: getFilteredRowModel(),
     getPaginationRowModel: getPaginationRowModel(),
+    manualPagination: Boolean(serverPagination),
+    pageCount: serverPagination
+      ? Math.max(Math.ceil(serverPagination.total / serverPagination.pageSize), 1)
+      : undefined,
   });
 
   React.useEffect(() => {

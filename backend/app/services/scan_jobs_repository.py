@@ -84,6 +84,7 @@ class ScanJobsRepository(MongoRepositoryBase):
         status: Optional[str] = None,
         last_error: Any = _UNSET,
         retry_count_delta: Optional[int] = None,
+        retry_count: Optional[int] = None,
         repository_url: Any = _UNSET,
         last_worker_id: Any = _UNSET,
         last_started_at: Any = _UNSET,
@@ -124,6 +125,9 @@ class ScanJobsRepository(MongoRepositoryBase):
         update_doc: Dict[str, Any] = {"$set": set_updates}
         if retry_count_delta:
             update_doc["$inc"] = {"retry_count": retry_count_delta}
+        if retry_count is not None:
+            update_doc.setdefault("$set", {})
+            update_doc["$set"]["retry_count"] = retry_count
 
         doc = self.db[self.collections.scan_jobs_collection].find_one_and_update(
             {"_id": ObjectId(job_id)},
@@ -131,6 +135,14 @@ class ScanJobsRepository(MongoRepositoryBase):
             return_document=ReturnDocument.AFTER,
         )
         return self._serialize(doc) if doc else None
+
+    def list_jobs_by_status(
+        self, project_id: str, statuses: List[str]
+    ) -> List[Dict[str, Any]]:
+        cursor = self.db[self.collections.scan_jobs_collection].find(
+            {"project_id": project_id, "status": {"$in": statuses}}
+        )
+        return [self._serialize(doc) for doc in cursor]
 
     def list_scan_jobs(self, limit: int = 100) -> List[Dict[str, Any]]:
         cursor = (

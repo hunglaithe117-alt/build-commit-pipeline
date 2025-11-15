@@ -8,9 +8,9 @@ from pydantic import BaseModel
 
 
 class ProjectStatus(str, Enum):
-    pending = "pending"
-    processing = "processing"
-    finished = "finished"
+    pending = "PENDING"
+    processing = "PROCESSING"
+    finished = "FINISHED"
 
 
 class ScanJobStatus(str, Enum):

@@ -11,7 +11,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     unzip \
     openjdk-17-jre-headless \
-    docker.io \
     && rm -rf /var/lib/apt/lists/* \
     && pip install --no-cache-dir --upgrade pip \
     && pip install --no-cache-dir uv

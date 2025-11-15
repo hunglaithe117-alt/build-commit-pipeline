@@ -167,6 +167,95 @@ Tips & Notes:
 - SonarQube: http://localhost:9001
 - RabbitMQ UI: http://localhost:15672 (pipeline/pipeline)
 
+## Triển khai Docker trên EC2 & lưu log Sonar lên S3
+
+> Các bước này mô tả cách chạy toàn bộ stack trên Amazon EC2, kết nối S3 để lưu log quét.
+
+### 1. Chuẩn bị máy EC2
+1. Tạo EC2 instance (Ubuntu 22.04 hoặc Amazon Linux 2). Khuyến nghị ít nhất `t3.xlarge` (4 vCPU / 16GB RAM) cho worker scan.
+2. Mở các port cần thiết: 22 (SSH), 80/443 (API/Frontend), 9001 (SonarQube nếu chạy chung), 5672/15672 (RabbitMQ nếu cần truy cập UI).
+3. Cài Docker & docker compose:
+   ```bash
+   sudo apt-get update -y
+   sudo apt-get install -y docker.io git
+   sudo usermod -aG docker $USER
+   newgrp docker
+   DOCKER_COMPOSE_VERSION=v2.24.7
+   sudo curl -SL https://github.com/docker/compose/releases/download/${DOCKER_COMPOSE_VERSION}/docker-compose-linux-x86_64 -o /usr/local/bin/docker-compose
+   sudo chmod +x /usr/local/bin/docker-compose
+   sudo systemctl enable --now docker
+   ```
+
+### 2. Clone repo & chuẩn bị thư mục dữ liệu
+```bash
+git clone https://github.com/<your-org>/build-commit-pipeline.git
+cd build-commit-pipeline
+mkdir -p ./data/sonar-work ./data/uploads ./data/exports ./data/failed_commits
+```
+
+### 3. Cấu hình SonarQube
+1. **Tạo token**  
+   - Truy cập UI SonarQube (ví dụ `http://<ec2-ip>:9001`).  
+   - `Administration → Security → Users/Tokens → Generate Token`. Token này map vào `sonarqube.instances[].token`.
+2. **Tạo webhook**  
+   - `Administration → Configuration → Webhooks → Create`.  
+   - URL: `https://<domain-or-ip>/api/sonar/webhook`.  
+   - Secret: copy vào `sonarqube.webhook_secret`.  
+3. (Nếu chạy Sonar trong docker-compose) chỉnh `docker-compose.yml` để expose port 9001 và map volume `./data/sonarqube` nếu muốn giữ dữ liệu.
+
+### 4. Kết nối S3 để lưu log scan
+1. Tạo S3 bucket (ví dụ `build-commit-pipeline-logs`).  
+2. Tạo IAM user/role với quyền `s3:PutObject`, `s3:GetObject`, `s3:ListBucket` cho bucket.  
+3. Cập nhật phần `s3` trong `config/pipeline.yml`:
+   ```yaml
+   s3:
+     enabled: true
+     bucket_name: build-commit-pipeline-logs
+     region: ap-southeast-1
+     access_key_id: <AWS_ACCESS_KEY_ID>      # bỏ nếu dùng IAM role EC2
+     secret_access_key: <AWS_SECRET_ACCESS_KEY>
+     endpoint_url: null                     # giữ null trừ khi dùng MinIO
+     sonar_logs_prefix: sonar-logs
+     error_logs_prefix: error-logs
+   ```
+   Nếu EC2 có IAM role, bỏ `access_key_id` và `secret_access_key`.
+
+### 5. Chỉnh `config/pipeline.yml`
+- Sao chép `config/pipeline.example.yml` → `config/pipeline.yml`.  
+- Quan trọng:
+  - `mongo.uri`: nếu dùng MongoDB Atlas, cập nhật URI + user.  
+  - `broker.url`: RabbitMQ URI.  
+  - `sonarqube.instances`: host + token.  
+  - `paths.*`: giữ mặc định `/app/data/...` vì compose đã mount `./data`.  
+  - `web.base_url`: domain dùng cho frontend (để trong email/link nếu cần).
+
+### 6. Build & chạy docker trên EC2
+```bash
+docker compose build
+docker compose up -d mongo rabbitmq db sonarqube
+# chờ SonarQube khởi động
+docker compose up -d api worker_ingest worker_scan worker_exports beat frontend
+```
+
+### 7. Thiết lập HTTPS / Reverse proxy (khuyến nghị)
+- Dùng Nginx hoặc AWS Load Balancer đặt trước API/Frontend.  
+- Cấu hình route `/api` → container `api:8000`, `/` → `frontend:3000`.  
+- Bật HTTPS (Let’s Encrypt hoặc ACM).
+
+### 8. Kiểm tra sau triển khai
+1. `curl http://<ec2-ip>:8000/health` để sure API up.  
+2. Mở `http://<ec2-ip>:3000` để truy cập UI.  
+3. Upload một CSV nhỏ, trigger ingest.  
+4. Theo dõi log `docker compose logs -f worker_scan`.  
+5. Kiểm tra S3 bucket xem log `.txt` được đẩy vào đúng prefix.
+
+### 9. Các lưu ý vận hành
+- **Celery beat**: container `beat` phải chạy để task `reconcile_scan_jobs` tự động requeue job kẹt.  
+- **Failed commits**: UI `/failed-commits` hiển thị job `FAILED_PERMANENT`. Dùng nút retry để cập nhật sonar.properties rồi enqueue lại.  
+- **Backup**: MongoDB chứa toàn bộ state; nên dùng Atlas hoặc replica set + backup định kỳ.  
+- **Scale**: tăng `worker_scan` và chỉnh `celery worker -c <n>` để nâng throughput.  
+- **Logs**: ngoài S3, nên forward stdout container về CloudWatch/ELK để dễ điều tra.
+
 **5) Chạy phát triển cục bộ (không Docker toàn bộ)**
 - Backend (sử dụng `uv` như repo đã cấu hình):
 

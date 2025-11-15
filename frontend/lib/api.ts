@@ -71,6 +71,10 @@ export type ScanResult = {
   created_at: string;
 };
 
+export type TriggerCollectionResult =
+  | { status: "queued" }
+  | { status: "retrying_failed"; count: number };
+
 export const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
 
@@ -157,7 +161,9 @@ export const api = {
     return (await response.json()) as Project;
   },
   triggerCollection: (id: string) =>
-    apiFetch(`/api/projects/${id}/collect`, { method: "POST" }),
+    apiFetch<TriggerCollectionResult>(`/api/projects/${id}/collect`, {
+      method: "POST",
+    }),
   listScanJobsPaginated: (
     page?: number,
     pageSize?: number,

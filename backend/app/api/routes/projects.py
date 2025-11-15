@@ -11,10 +11,11 @@ from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import StreamingResponse
 
-from app.models import Project
+from app.models import Project, ProjectStatus, ScanJobStatus
 from pipeline.ingestion import CSVIngestionPipeline
 from app.services import file_service, repository
 from app.tasks.ingestion import ingest_project
+from app.tasks.sonar import run_scan_job
 
 router = APIRouter()
 
@@ -111,8 +112,59 @@ async def trigger_collection(project_id: str) -> dict:
     record = await run_in_threadpool(repository.get_project, project_id)
     if not record:
         raise HTTPException(status_code=404, detail="Project not found")
-    ingest_project.delay(project_id)
-    return {"status": "queued"}
+    status_value = record.get("status")
+    try:
+        project_status = ProjectStatus(status_value)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid project status.")
+
+    if project_status == ProjectStatus.processing:
+        raise HTTPException(status_code=400, detail="Project is already processing.")
+
+    if project_status == ProjectStatus.pending:
+        ingest_project.delay(project_id)
+        await run_in_threadpool(
+            repository.update_project,
+            project_id,
+            status=ProjectStatus.processing.value,
+            processed_commits=0,
+            failed_commits=0,
+        )
+        return {"status": "queued"}
+
+    if project_status == ProjectStatus.finished:
+        failed_jobs = await run_in_threadpool(
+            repository.list_scan_jobs_by_status,
+            project_id,
+            [ScanJobStatus.failed_permanent.value],
+        )
+        if not failed_jobs:
+            raise HTTPException(
+                status_code=400,
+                detail="Project already finished with no failed commits to retry.",
+            )
+        for job in failed_jobs:
+            await run_in_threadpool(
+                repository.update_scan_job,
+                job["id"],
+                status=ScanJobStatus.pending.value,
+                last_error=None,
+                retry_count=0,
+                last_worker_id=None,
+                last_started_at=None,
+                last_finished_at=None,
+            )
+            run_scan_job.delay(job["id"])
+        new_failed = max((record.get("failed_commits") or 0) - len(failed_jobs), 0)
+        await run_in_threadpool(
+            repository.update_project,
+            project_id,
+            status=ProjectStatus.processing.value,
+            failed_commits=new_failed,
+        )
+        return {"status": "retrying_failed", "count": len(failed_jobs)}
+
+    raise HTTPException(status_code=400, detail="Unsupported project state.")
 
 
 @router.post("/{project_id}/config", response_model=Project)

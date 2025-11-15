@@ -77,12 +77,6 @@ async def sonar_webhook(
     if not scan_job:
         raise HTTPException(status_code=404, detail="Scan job not tracked")
 
-    await run_in_threadpool(
-        repository.update_scan_job,
-        scan_job["id"],
-        status=ScanJobStatus.running.value,
-    )
-
     export_metrics.delay(
         component_key,
         job_id=scan_job["id"],
