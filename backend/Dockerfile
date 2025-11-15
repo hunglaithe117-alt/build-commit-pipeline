@@ -10,7 +10,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     curl \
     unzip \
-    openjdk-17-jre-headless \
+    openjdk-21-jre \
     && rm -rf /var/lib/apt/lists/* \
     && pip install --no-cache-dir --upgrade pip \
     && pip install --no-cache-dir uv

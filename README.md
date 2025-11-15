@@ -1,16 +1,15 @@
 # Build Commit Pipeline
 
-Pipeline orchestrator for TravisTorrent data ingestion and SonarQube enrichment with **distributed instance pooling**.
+Pipeline for TravisTorrent data ingestion and SonarQube enrichment.
 
 ## Features
 
 - **Project-centric ingestion**: Upload một CSV là tạo ngay record `Project`, Celery tự sinh `ScanJob` cho từng commit và theo dõi tiến độ/ thống kê.
 - **Multi-Instance SonarQube Pool**: Process commits across multiple SonarQube instances in parallel.
 - **At-least-once scan jobs**: Từng job luôn nằm trong Mongo với trạng thái rõ ràng (`PENDING/RUNNING/SUCCESS/FAILED_TEMP/FAILED_PERMANENT`). Những commit `FAILED_PERMANENT` tự động xuất hiện ở trang “Failed commits” để chỉnh sonar.properties và retry.
-- **Persistent metrics**: Kết quả SonarQube cho từng commit được lưu trong `scan_results`. API `/projects/{id}/results/export` stream CSV để bạn tải toàn bộ metrics cho một project.
-- **High Throughput**: Process multiple commits simultaneously with automatic load balancing.
+- **Persistent metrics**: Kết quả SonarQube cho từng commit được lưu trong `scan_results`. API `/projects/{id}/results/export` để bạn tải toàn bộ metrics cho một project.
 - **Fault Tolerant**: Auto-retry với giới hạn `max_retries`, worker chết không làm mất job (Celery `acks_late + reject_on_worker_lost`).
-- **Observable**: UI hiển thị workers stats, scan jobs, failed commits và export kết quả ngay trong trình duyệt.
+- **Observable**: UI hiển thị workers stats, scan jobs, failed commits và export kết quả.
 
 ### Thành phần chính
 
@@ -55,17 +54,7 @@ Hãy chắc chắn bạn đã chỉnh `config/pipeline.yml`:
 - `sonarqube.instances[].token` → token truy cập SonarQube (bắt buộc khi gọi API)
 - `paths.default_workdir` → nơi lưu các clone/worktree (mặc định `/app/data/sonar-work`), đảm bảo `./data` trên host có quyền ghi.
 
-**3) Cách SonarScanner được thực thi trong hiện tại (quan trọng)**
-- Hiện tại `backend/pipeline/sonar.py` gọi `docker run sonarsource/sonar-scanner-cli` từ bên trong container (sử dụng Docker CLI).
-- Điều này đưa ra hai lựa chọn:
-  A) Mount socket Docker vào container và cài Docker CLI trong image (container sẽ gọi Docker trên host). Yêu cầu xử lý quyền truy cập socket hoặc chạy container dưới user có quyền.
-  B) Khuyến nghị: cài trực tiếp `sonar-scanner` (binary) vào image backend và chạy lệnh local (không cần socket Docker). An toàn hơn và dễ cấu hình.
-  
-Ghi chú: dự án hiện được cấu hình để chạy SonarScanner bằng binary (SonarScanner đã cài sẵn trong `backend` image). Việc khởi container `sonarsource/sonar-scanner-cli` từ trong worker (qua Docker socket) đã được loại bỏ để tránh phụ thuộc vào quyền truy cập Docker daemon và để đơn giản hoá triển khai.
-
-Nếu bạn cần lại phương án container trong tương lai, tôi có thể thêm hướng dẫn riêng; hiện tại không cần mount `/var/run/docker.sock`.
-
-**4) Khởi động nhanh (docker compose)**
+**3. Khởi động nhanh (docker compose)**
 1) Cập nhật token Sonar trong `config/pipeline.yml`.
 2) Khởi động core infra (SonarQube cần thời gian để khởi tạo DB và web):
 
