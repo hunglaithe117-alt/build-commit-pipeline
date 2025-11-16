@@ -18,6 +18,7 @@ class FailedCommitsRepository(MongoRepositoryBase):
             "status": "pending",
             "config_override": payload.get("commit", {}).get("config_override"),
             "config_source": payload.get("commit", {}).get("config_source"),
+            "counted": True,
             "created_at": now,
             "updated_at": now,
         }
@@ -69,6 +70,13 @@ class FailedCommitsRepository(MongoRepositoryBase):
         )
         return self._serialize(doc) if doc else None
 
+    def get_failed_commit_by_job(self, job_id: str) -> Optional[Dict[str, Any]]:
+        """Return the failed commit record created for a specific scan job."""
+        doc = self.db[self.collections.failed_commits_collection].find_one(
+            {"payload.job_id": job_id}
+        )
+        return self._serialize(doc) if doc else None
+
     def update_failed_commit(
         self,
         record_id: str,
@@ -78,6 +86,7 @@ class FailedCommitsRepository(MongoRepositoryBase):
         status: Optional[str] = None,
         resolved_at: Any = None,
         payload: Any = None,
+        counted: Optional[bool] = None,
     ) -> Optional[Dict[str, Any]]:
         updates: Dict[str, Any] = {"updated_at": datetime.utcnow()}
         if config_override is not None:
@@ -90,6 +99,8 @@ class FailedCommitsRepository(MongoRepositoryBase):
             updates["resolved_at"] = resolved_at
         if payload is not None:
             updates["payload"] = payload
+        if counted is not None:
+            updates["counted"] = counted
         doc = self.db[self.collections.failed_commits_collection].find_one_and_update(
             {"_id": ObjectId(record_id)},
             {"$set": updates},

@@ -83,6 +83,7 @@ class FailedCommit(BaseModel):
     status: str = "pending"
     config_override: Optional[str] = None
     config_source: Optional[str] = None
+    counted: bool = True
     created_at: datetime
     updated_at: Optional[datetime] = None
     resolved_at: Optional[datetime] = None

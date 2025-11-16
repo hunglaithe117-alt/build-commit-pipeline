@@ -93,6 +93,9 @@ class Repository:
     def get_failed_commit(self, *a, **k):
         return self.failed_commits.get_failed_commit(*a, **k)
 
+    def get_failed_commit_by_job(self, *a, **k):
+        return self.failed_commits.get_failed_commit_by_job(*a, **k)
+
     def update_failed_commit(self, *a, **k):
         return self.failed_commits.update_failed_commit(*a, **k)
 

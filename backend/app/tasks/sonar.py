@@ -39,6 +39,45 @@ def _check_project_completion(project_id: str) -> None:
         repository.update_project(project_id, status=ProjectStatus.finished.value)
 
 
+def _record_failed_commit(
+    job: Dict[str, Any],
+    project: Optional[Dict[str, Any]],
+    *,
+    reason: str,
+    error: str,
+) -> None:
+    project_id = (project or {}).get("id") or job.get("project_id")
+    project_key = (project or {}).get("project_key") or job.get("project_key")
+    payload = {
+        "job_id": job["id"],
+        "project_id": project_id,
+        "project_key": project_key,
+        "commit_sha": job.get("commit_sha"),
+        "repository_url": job.get("repository_url"),
+        "repo_slug": job.get("repo_slug"),
+        "error": error,
+    }
+    existing = repository.get_failed_commit_by_job(job["id"])
+    already_counted = (existing or {}).get("counted", True)
+    should_increment = bool(project) and (existing is None or not already_counted)
+
+    if existing:
+        repository.update_failed_commit(
+            existing["id"],
+            payload=payload,
+            status="pending",
+            counted=True,
+        )
+    else:
+        repository.insert_failed_commit(
+            payload=payload,
+            reason=reason,
+        )
+
+    if should_increment and project:
+        repository.update_project(project["id"], failed_delta=1)
+
+
 def _handle_scan_failure(
     task,
     job: Dict[str, Any],
@@ -70,19 +109,7 @@ def _handle_scan_failure(
             last_error=message,
             last_finished_at=now,
         )
-        repository.update_project(project["id"], failed_delta=1)
-        repository.insert_failed_commit(
-            payload={
-                "job_id": job["id"],
-                "project_id": project["id"],
-                "project_key": project.get("project_key"),
-                "commit_sha": job.get("commit_sha"),
-                "repository_url": job.get("repository_url"),
-                "repo_slug": job.get("repo_slug"),
-                "error": message,
-            },
-            reason="scan-failed",
-        )
+        _record_failed_commit(job, project, reason="scan-failed", error=message)
         _check_project_completion(project["id"])
         logger.error(
             "Scan job %s failed permanently after %s attempts: %s",
@@ -132,13 +159,11 @@ def run_scan_job(self, scan_job_id: str) -> str:
             last_error="Project not found",
             last_finished_at=datetime.utcnow(),
         )
-        repository.insert_failed_commit(
-            payload={
-                "job_id": job["id"],
-                "project_id": job["project_id"],
-                "commit_sha": job.get("commit_sha"),
-            },
+        _record_failed_commit(
+            job,
+            None,
             reason="project-missing",
+            error="Project not found",
         )
         return job["id"]
 
@@ -217,7 +242,17 @@ def export_metrics(
         last_error=None,
         last_finished_at=datetime.utcnow(),
     )
-    repository.update_project(project_id, processed_delta=1)
+    failed_record = repository.get_failed_commit_by_job(job_id)
+    update_kwargs: Dict[str, Any] = {"processed_delta": 1}
+    if failed_record and failed_record.get("counted", True):
+        repository.update_failed_commit(
+            failed_record["id"],
+            status="resolved",
+            resolved_at=datetime.utcnow(),
+            counted=False,
+        )
+        update_kwargs["failed_delta"] = -1
+    repository.update_project(project_id, **update_kwargs)
     _check_project_completion(project_id)
     logger.info(
         "Stored metrics for component %s (job=%s, project=%s)",

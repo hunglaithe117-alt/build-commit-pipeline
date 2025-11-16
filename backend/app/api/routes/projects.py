@@ -155,6 +155,17 @@ async def trigger_collection(project_id: str) -> dict:
                 last_finished_at=None,
             )
             run_scan_job.delay(job["id"])
+            failed_record = await run_in_threadpool(
+                repository.get_failed_commit_by_job,
+                job["id"],
+            )
+            if failed_record:
+                await run_in_threadpool(
+                    repository.update_failed_commit,
+                    failed_record["id"],
+                    status="queued",
+                    counted=False,
+                )
         new_failed = max((record.get("failed_commits") or 0) - len(failed_jobs), 0)
         await run_in_threadpool(
             repository.update_project,
