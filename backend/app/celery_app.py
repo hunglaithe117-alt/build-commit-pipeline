@@ -19,16 +19,15 @@ celery_app.conf.update(
     task_default_queue=settings.broker.default_queue,
     task_acks_late=True,
     worker_prefetch_multiplier=1,
-    worker_concurrency=settings.pipeline.sonar_parallelism,
     broker_connection_retry_on_startup=True,
-    task_default_retry_delay=10,
+    task_reject_on_worker_lost=True,
     task_retry_backoff=True,
-    task_retry_backoff_max=180,  # Max 3 minutes
-    task_retry_jitter=True,  # Add randomness to avoid thundering herd
+    task_retry_jitter=True,
+    task_default_max_retries=2,
     task_routes={
         "app.tasks.sonar.export_metrics": {"queue": "pipeline.exports"},
-        "app.tasks.sonar.run_commit_scan": {"queue": "pipeline.scan"},
-        "app.tasks.ingestion.ingest_data_source": {"queue": "pipeline.ingest"},
+        "app.tasks.sonar.run_scan_job": {"queue": "pipeline.scan"},
+        "app.tasks.ingestion.ingest_project": {"queue": "pipeline.ingest"},
     },
 )
 

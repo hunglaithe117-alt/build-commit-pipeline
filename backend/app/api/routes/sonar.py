@@ -9,13 +9,14 @@ from fastapi import APIRouter, Header, HTTPException, Request, Query
 from fastapi.concurrency import run_in_threadpool
 
 from app.core.config import settings
-from app.models import SonarRun
+from app.models import ScanJobStatus, ScanResult
 from app.services import repository
 from app.tasks.sonar import export_metrics
 import logging
 
 router = APIRouter()
 LOG = logging.getLogger("sonar_api")
+
 
 @router.get("/runs")
 async def list_runs(
@@ -27,12 +28,22 @@ async def list_runs(
 ) -> dict:
     parsed_filters = json.loads(filters) if filters else None
     result = await run_in_threadpool(
-        repository.list_sonar_runs_paginated, page, page_size, sort_by, sort_dir, parsed_filters
+        repository.list_scan_results_paginated,
+        page,
+        page_size,
+        sort_by,
+        sort_dir,
+        parsed_filters,
     )
-    return {"items": [SonarRun(**run) for run in result["items"]], "total": result["total"]}
+    return {
+        "items": [ScanResult(**run) for run in result["items"]],
+        "total": result["total"],
+    }
 
 
-def _validate_signature(body: bytes, signature: Optional[str], token_header: Optional[str]) -> None:
+def _validate_signature(
+    body: bytes, signature: Optional[str], token_header: Optional[str]
+) -> None:
     secret = settings.sonarqube.webhook_secret
     if token_header:
         if token_header != secret:
@@ -60,32 +71,16 @@ async def sonar_webhook(
     if not component_key:
         raise HTTPException(status_code=400, detail="project key missing")
 
-    sonar_run = await run_in_threadpool(
-        repository.find_sonar_run_by_component, component_key
+    scan_job = await run_in_threadpool(
+        repository.find_scan_job_by_component, component_key
     )
-    if not sonar_run:
-        raise HTTPException(status_code=404, detail="Run not tracked")
+    if not scan_job:
+        raise HTTPException(status_code=404, detail="Scan job not tracked")
 
-    analysis_id = payload.get("analysis", {}).get("key") or payload.get("analysisId")
-    status = payload.get("qualityGate", {}).get("status") or payload.get("status")
-    status_normalised = (status or "").lower()
-
-    await run_in_threadpool(
-        repository.upsert_sonar_run,
-        data_source_id=sonar_run["data_source_id"],
-        project_key=sonar_run["project_key"],
-        commit_sha=sonar_run.get("commit_sha"),
-        job_id=sonar_run.get("job_id"),
-        status=status or "unknown",
-        analysis_id=analysis_id,
-        component_key=component_key,
+    export_metrics.delay(
+        component_key,
+        job_id=scan_job["id"],
+        project_id=scan_job["project_id"],
+        commit_sha=scan_job.get("commit_sha"),
     )
-
-    if status_normalised in {"ok", "success"}:
-        export_metrics.delay(
-            component_key,
-            job_id=sonar_run.get("job_id"),
-            data_source_id=sonar_run["data_source_id"],
-            analysis_id=analysis_id,
-        )
     return {"received": True}

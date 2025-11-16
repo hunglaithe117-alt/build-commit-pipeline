@@ -3,15 +3,14 @@ services:
     build:
       context: ./backend
     container_name: build_commit_api
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000
     user: "${APP_UID:-1000}:${APP_GID:-1000}"
+    restart: unless-stopped
     environment:
       PIPELINE_CONFIG: /app/config/pipeline.yml
     volumes:
-      - ./backend:/app
       - ./config/pipeline.yml:/app/config/pipeline.yml:ro
       - ./data:/app/data
-      - ../sonar-scan:/app/sonar-scan:ro
     depends_on:
       - rabbitmq
       - mongo
@@ -24,13 +23,12 @@ services:
     container_name: build_commit_worker_ingest
     command: celery -A app.celery_app.celery_app worker --loglevel=info -Q pipeline.ingest -n ingest.%h -c 1
     user: "${APP_UID:-1000}:${APP_GID:-1000}"
+    restart: unless-stopped
     environment:
       PIPELINE_CONFIG: /app/config/pipeline.yml
     volumes:
-      - ./backend:/app
       - ./config/pipeline.yml:/app/config/pipeline.yml:ro
       - ./data:/app/data
-      - ../sonar-scan:/app/sonar-scan:ro
     depends_on:
       - rabbitmq
       - mongo
@@ -41,13 +39,14 @@ services:
     container_name: build_commit_worker_scan
     command: celery -A app.celery_app.celery_app worker --loglevel=info -Q pipeline.scan -n scan.%h -c 4
     user: "${APP_UID:-1000}:${APP_GID:-1000}"
+    restart: unless-stopped
     environment:
       PIPELINE_CONFIG: /app/config/pipeline.yml
+      # JVM options for the sonar-scanner binary. Tweak -Xmx/-Xms to match host resources.
+      SONAR_SCANNER_OPTS: "-Xmx2g -Xms512m"
     volumes:
-      - ./backend:/app
       - ./config/pipeline.yml:/app/config/pipeline.yml:ro
       - ./data:/app/data
-      - ../sonar-scan:/app/sonar-scan:ro
     depends_on:
       - rabbitmq
       - mongo
@@ -58,13 +57,12 @@ services:
     container_name: build_commit_worker_exports
     command: celery -A app.celery_app.celery_app worker --loglevel=info -Q pipeline.exports -n exports.%h -c 1
     user: "${APP_UID:-1000}:${APP_GID:-1000}"
+    restart: unless-stopped
     environment:
       PIPELINE_CONFIG: /app/config/pipeline.yml
     volumes:
-      - ./backend:/app
       - ./config/pipeline.yml:/app/config/pipeline.yml:ro
       - ./data:/app/data
-      - ../sonar-scan:/app/sonar-scan:ro
     depends_on:
       - rabbitmq
       - mongo
@@ -73,12 +71,12 @@ services:
     build:
       context: ./backend
     container_name: build_commit_beat
-    command: celery -A app.celery_app.celery_app beat --loglevel=info
+    command: celery -A app.celery_app.celery_app beat --loglevel=info --schedule=/app/data/celerybeat-schedule
     user: "${APP_UID:-1000}:${APP_GID:-1000}"
+    restart: unless-stopped
     environment:
       PIPELINE_CONFIG: /app/config/pipeline.yml
     volumes:
-      - ./backend:/app
       - ./config/pipeline.yml:/app/config/pipeline.yml:ro
       - ./data:/app/data
     depends_on:
@@ -89,12 +87,11 @@ services:
     build:
       context: ./frontend
     container_name: build_commit_frontend
-    command: npm run dev -- --hostname 0.0.0.0 --port 3000
+    command: npm run start -- -H 0.0.0.0 -p 3000
     user: "${APP_UID:-1000}:${APP_GID:-1000}"
+    restart: unless-stopped
     environment:
       NEXT_PUBLIC_API_BASE_URL: http://localhost:8000
-    volumes:
-      - ./frontend:/app
     depends_on:
       - api
     ports:
@@ -168,9 +165,8 @@ services:
     command: -config.file=/etc/promtail/config.yml
     volumes:
       - ./config/promtail-config.yml:/etc/promtail/config.yml:ro
-      - /var/lib/docker/containers:/var/lib/docker/containers:ro
       - /var/run/docker.sock:/var/run/docker.sock:ro
-      - ./data:/var/pipeline-data:ro
+      - ./data/promtail:/var/promtail
     depends_on:
       - loki
 

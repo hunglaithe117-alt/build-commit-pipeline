@@ -2,37 +2,41 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pandas as pd
 from celery.utils.log import get_task_logger
 
 from app.celery_app import celery_app
 from app.core.config import settings
-import pandas as pd
-
+from app.models import ProjectStatus
+from app.services import repository
 from pipeline.ingestion import CSVIngestionPipeline
 from pipeline.sonar import normalize_repo_url
-from app.services import repository
-from app.tasks.sonar import run_commit_scan
+from app.tasks.sonar import run_scan_job
 
 logger = get_task_logger(__name__)
 
 
-@celery_app.task(
-    bind=True,
-    autoretry_for=(Exception,),
-    retry_backoff=True,
-    retry_kwargs={"max_retries": 3},
-)
-def ingest_data_source(self, data_source_id: str) -> dict:
-    data_source = repository.get_data_source(data_source_id)
-    if not data_source:
-        raise ValueError(f"Data source {data_source_id} not found")
+@celery_app.task(bind=True)
+def ingest_project(self, project_id: str) -> dict:
+    project = repository.get_project(project_id)
+    if not project:
+        raise ValueError(f"Project {project_id} not found")
 
-    repository.update_data_source(data_source_id, status="processing")
-    csv_path = Path(data_source["file_path"])
+    source_path = project.get("source_path")
+    if not source_path:
+        raise ValueError(f"Project {project_id} missing source_path for ingestion")
+
+    csv_path = Path(source_path)
     pipeline = CSVIngestionPipeline(csv_path)
     summary = pipeline.summarise()
-    repository.update_data_source(data_source_id, stats=summary)
-    # Use pandas to load and deduplicate commits by (project_key, commit_sha)
+
+    repository.update_project(
+        project_id,
+        status=ProjectStatus.processing.value,
+        total_builds=summary.get("total_builds", 0),
+        total_commits=summary.get("total_commits", 0),
+    )
+
     default_project_key = Path(csv_path).stem
     df = pd.read_csv(csv_path, encoding=settings.pipeline.csv_encoding, dtype=str)
     df = df.fillna("")
@@ -44,47 +48,34 @@ def ingest_data_source(self, data_source_id: str) -> dict:
         return slug.replace("/", "_") if slug else default_project_key
 
     df["project_key"] = df["repo_slug"].apply(_derive_key)
-
     df = df[df["commit"] != ""]
-
     df_unique = df.drop_duplicates(subset=["project_key", "commit"], keep="first")
 
-    total = int(len(df_unique))
-    job = repository.create_job(
-        data_source_id=data_source_id,
-        job_type="ingestion",
-        total=total,
-        status="running" if total else "succeeded",
-    )
-
-    if total == 0:
-        repository.update_data_source(data_source_id, status="ready")
-        return {"job_id": job["id"], "queued": 0}
-
-    repository.update_job(job["id"], status="running")
+    total_commits = int(len(df_unique))
+    if total_commits == 0:
+        repository.update_project(project_id, status=ProjectStatus.finished.value)
+        return {"project_id": project_id, "queued": 0}
 
     queued = 0
+    max_retries = project.get("max_retries", settings.pipeline.default_retry_limit)
 
     for _, row in df_unique.iterrows():
         project_key = row["project_key"]
         commit = row["commit"]
         repo_slug = row["repo_slug"] or None
         repo_url = row.get("repository_url") or None
-        if not repo_url and repo_slug:
-            repo_url = f"https://github.com/{repo_slug}.git"
+        repo_url = normalize_repo_url(repo_url, repo_slug)
 
-        payload = {
-            "project_key": project_key,
-            "repo_slug": repo_slug,
-            "repository_url": repo_url,
-            "commit_sha": commit,
-        }
-        payload["repo_url"] = normalize_repo_url(
-            payload.get("repository_url"), payload.get("repo_slug")
+        job_doc = repository.create_scan_job(
+            project_id=project_id,
+            commit_sha=commit,
+            repository_url=repo_url,
+            repo_slug=repo_slug,
+            project_key=project_key,
+            max_retries=max_retries,
         )
-
-        run_commit_scan.delay(job["id"], data_source_id, payload)
+        run_scan_job.delay(job_doc["id"])
         queued += 1
 
-    logger.info("Queued %d commits for job %s", queued, job["id"])
-    return {"job_id": job["id"], "queued": queued}
+    logger.info("Queued %d scan jobs for project %s", queued, project_id)
+    return {"project_id": project_id, "queued": queued}

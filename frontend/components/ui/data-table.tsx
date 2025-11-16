@@ -32,6 +32,8 @@ type DataTableProps<TData, TValue> = {
   columns: ColumnDef<TData, TValue>[];
   data: TData[];
   emptyMessage?: string;
+  loadingMessage?: string;
+  isLoading?: boolean;
   className?: string;
   pageSize?: number;
   renderToolbar?: (table: TanStackTable<TData>) => React.ReactNode;
@@ -58,6 +60,8 @@ export function DataTable<TData, TValue>({
   renderToolbar,
   serverPagination,
   serverOnChange,
+  isLoading = false,
+  loadingMessage = "Đang tải...",
 }: DataTableProps<TData, TValue>) {
   const [sorting, setSorting] = React.useState<SortingState>([]);
   const [columnFilters, setColumnFilters] = React.useState<ColumnFiltersState>([]);
@@ -97,6 +101,10 @@ export function DataTable<TData, TValue>({
     getSortedRowModel: getSortedRowModel(),
     getFilteredRowModel: getFilteredRowModel(),
     getPaginationRowModel: getPaginationRowModel(),
+    manualPagination: Boolean(serverPagination),
+    pageCount: serverPagination
+      ? Math.max(Math.ceil(serverPagination.total / serverPagination.pageSize), 1)
+      : undefined,
   });
 
   React.useEffect(() => {
@@ -138,7 +146,13 @@ export function DataTable<TData, TValue>({
           ))}
         </TableHeader>
         <TableBody>
-          {table.getRowModel().rows?.length ? (
+          {isLoading ? (
+            <TableRow>
+              <TableCell colSpan={columns.length} className="h-32 text-center text-sm text-muted-foreground">
+                {loadingMessage}
+              </TableCell>
+            </TableRow>
+          ) : table.getRowModel().rows?.length ? (
             table.getRowModel().rows.map((row) => (
               <TableRow key={row.id} data-state={row.getIsSelected() && "selected"}>
                 {row.getVisibleCells().map((cell) => (
