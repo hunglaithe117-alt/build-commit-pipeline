@@ -10,6 +10,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     curl \
     unzip \
+    git \
     openjdk-21-jre \
     && rm -rf /var/lib/apt/lists/* \
     && pip install --no-cache-dir --upgrade pip \
@@ -32,6 +33,13 @@ RUN uv sync --frozen --no-dev --no-install-project
 COPY . .
 
 ENV PATH="/app/.venv/bin:${PATH}"
+
+# Create data directories with correct permissions
+RUN mkdir -p /app/data/uploads /app/data/exports /app/data/sonar-work && \
+    chmod -R 777 /app/data
+
+# Configure git safe directory to allow operations on mounted volumes
+RUN git config --system safe.directory '*'
 
 EXPOSE 8000
 

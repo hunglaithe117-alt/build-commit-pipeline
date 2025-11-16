@@ -8,6 +8,7 @@ services:
     restart: unless-stopped
     environment:
       PIPELINE_CONFIG: /app/config/pipeline.yml
+      HOME: /tmp  # Required for git operations
     volumes:
       - ./config/pipeline.yml:/app/config/pipeline.yml:ro
       - ./data:/app/data
@@ -26,6 +27,7 @@ services:
     restart: unless-stopped
     environment:
       PIPELINE_CONFIG: /app/config/pipeline.yml
+      HOME: /tmp  # Required for git operations
     volumes:
       - ./config/pipeline.yml:/app/config/pipeline.yml:ro
       - ./data:/app/data
@@ -42,6 +44,7 @@ services:
     restart: unless-stopped
     environment:
       PIPELINE_CONFIG: /app/config/pipeline.yml
+      HOME: /tmp  # Required for git operations
       # JVM options for the sonar-scanner binary. Tweak -Xmx/-Xms to match host resources.
       SONAR_SCANNER_OPTS: "-Xmx2g -Xms512m"
     volumes:
@@ -60,6 +63,7 @@ services:
     restart: unless-stopped
     environment:
       PIPELINE_CONFIG: /app/config/pipeline.yml
+      HOME: /tmp  # Required for git operations
     volumes:
       - ./config/pipeline.yml:/app/config/pipeline.yml:ro
       - ./data:/app/data
@@ -76,6 +80,7 @@ services:
     restart: unless-stopped
     environment:
       PIPELINE_CONFIG: /app/config/pipeline.yml
+      HOME: /tmp  # Required for git operations
     volumes:
       - ./config/pipeline.yml:/app/config/pipeline.yml:ro
       - ./data:/app/data
