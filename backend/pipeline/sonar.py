@@ -126,6 +126,65 @@ class SonarCommitRunner:
         )
         return completed.returncode == 0
 
+    def _find_commit_repo_via_github(self, repo_slug: str, commit_sha: str) -> Optional[str]:
+        """
+        Use GitHub API to find which repository contains the commit.
+        Returns the clone URL if found, None otherwise.
+        """
+        try:
+            # Try the main repo first
+            api_url = f"https://api.github.com/repos/{repo_slug}/commits/{commit_sha}"
+            resp = requests.get(api_url, timeout=10)
+            if resp.status_code == 200:
+                LOG.debug("Commit %s exists in main repo %s", commit_sha, repo_slug)
+                return f"https://github.com/{repo_slug}.git"
+            
+            # If not in main repo, search through forks
+            LOG.info("Commit %s not in main repo, searching forks...", commit_sha)
+            forks_url = f"https://api.github.com/repos/{repo_slug}/forks"
+            params = {"per_page": 100}
+            page = 1
+            
+            while page <= 5:  # Limit to first 500 forks
+                resp = requests.get(forks_url, params={**params, "page": page}, timeout=10)
+                if resp.status_code != 200:
+                    LOG.warning("Failed to fetch forks page %d: %s", page, resp.status_code)
+                    break
+                    
+                forks = resp.json()
+                if not forks:
+                    break
+                    
+                for fork in forks:
+                    fork_full_name = fork.get("full_name")
+                    if not fork_full_name:
+                        continue
+                    
+                    # Check if commit exists in this fork
+                    fork_commit_url = f"https://api.github.com/repos/{fork_full_name}/commits/{commit_sha}"
+                    fork_resp = requests.get(fork_commit_url, timeout=5)
+                    if fork_resp.status_code == 200:
+                        fork_clone_url = f"https://github.com/{fork_full_name}.git"
+                        LOG.info(
+                            "Found commit %s in fork %s",
+                            commit_sha,
+                            fork_full_name,
+                        )
+                        return fork_clone_url
+                
+                page += 1
+            
+            LOG.warning("Commit %s not found in main repo or any accessible forks", commit_sha)
+            return None
+            
+        except Exception as exc:
+            LOG.warning(
+                "Error searching for commit %s via GitHub API: %s",
+                commit_sha,
+                exc,
+            )
+            return None
+
     def _fetch_commit_from_fork(
         self, repo: Path, commit_sha: str, fork_url: str
     ) -> bool:
@@ -314,14 +373,14 @@ class SonarCommitRunner:
                 # on a different remote (e.g. a fork). Try multiple strategies:
                 # 1. Fetch all pull request refs (already done in refresh_repo)
                 # 2. Try fetching the specific commit directly from origin
-                # 3. If repo_slug provided, try fetching from a fork remote
+                # 3. Use GitHub API to find which fork contains the commit
                 if not self._commit_exists(repo, commit_sha):
                     LOG.warning(
                         "Commit %s not found after initial fetch, trying alternate strategies",
                         commit_sha,
                     )
                     
-                    # Strategy 1: Try fetching the specific commit SHA directly
+                    # Strategy 1: Try fetching the specific commit SHA directly from origin
                     try:
                         run_command(
                             ["git", "fetch", "origin", commit_sha],
@@ -330,48 +389,48 @@ class SonarCommitRunner:
                         )
                         if self._commit_exists(repo, commit_sha):
                             LOG.info("Found commit %s via direct SHA fetch", commit_sha)
-                        else:
-                            LOG.warning("Direct SHA fetch completed but commit still missing")
                     except Exception as e:
                         LOG.debug("Direct SHA fetch failed: %s", e)
                     
-                    # Strategy 2: If still missing and repo_slug exists, try fork fetch
+                    # Strategy 2: If still missing and repo_slug exists, use GitHub API to find the fork
                     if not self._commit_exists(repo, commit_sha) and repo_slug:
-                        try:
-                            fallback_url = normalize_repo_url(None, repo_slug)
-                        except Exception:
-                            fallback_url = None
-
-                        if fallback_url and fallback_url != repo_url:
-                            # Try to fetch the specific commit from the fork
-                            if self._fetch_commit_from_fork(
-                                repo, commit_sha, fallback_url
-                            ):
+                        LOG.info(
+                            "Commit %s not in main repo, searching for fork via GitHub API",
+                            commit_sha,
+                        )
+                        fork_url = self._find_commit_repo_via_github(repo_slug, commit_sha)
+                        
+                        if fork_url:
+                            # Try to fetch the specific commit from the identified fork
+                            if self._fetch_commit_from_fork(repo, commit_sha, fork_url):
                                 LOG.info(
-                                    "Successfully retrieved commit %s from fork",
+                                    "Successfully retrieved commit %s from fork %s",
                                     commit_sha,
+                                    fork_url,
                                 )
                             else:
                                 LOG.error(
-                                    "Commit %s not found in origin, pull requests, or fork repository %s",
+                                    "Failed to fetch commit %s from identified fork %s",
                                     commit_sha,
-                                    fallback_url,
+                                    fork_url,
                                 )
                                 raise RuntimeError(
-                                    f"Commit {commit_sha} not found in origin or fork repository. "
-                                    f"This commit may belong to a different fork that is not accessible."
+                                    f"Commit {commit_sha} was found in fork {fork_url} "
+                                    f"but could not be fetched. This may be due to network issues."
                                 )
                         else:
                             LOG.error(
-                                "Commit %s not found and no valid fork URL to try",
+                                "Commit %s not found in origin repository or any accessible forks",
                                 commit_sha,
                             )
                             raise RuntimeError(
-                                f"Commit {commit_sha} not found in repository"
+                                f"Commit {commit_sha} not found in repository {repo_slug} "
+                                f"or any of its forks. This commit may belong to a private fork "
+                                f"or may have been deleted."
                             )
                     elif not self._commit_exists(repo, commit_sha):
                         LOG.error(
-                            "Commit %s not found and no repo_slug provided to fetch from fork",
+                            "Commit %s not found and no repo_slug provided to search forks",
                             commit_sha,
                         )
                         raise RuntimeError(
