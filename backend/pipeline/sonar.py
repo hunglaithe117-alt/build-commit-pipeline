@@ -105,6 +105,12 @@ class SonarCommitRunner:
         run_command(
             ["git", "remote", "set-url", "origin", repo_url], cwd=repo, allow_fail=True
         )
+        # Fetch all refs including pull requests which may contain fork commits
+        run_command(
+            ["git", "fetch", "origin", "+refs/pull/*/head:refs/remotes/origin/pr/*"],
+            cwd=repo,
+            allow_fail=True,
+        )
         run_command(
             ["git", "fetch", "--all", "--tags", "--prune"], cwd=repo, allow_fail=True
         )
@@ -305,10 +311,32 @@ class SonarCommitRunner:
                 repo = self.repo_dir
 
                 # If the commit object is missing after a normal fetch, it may live
-                # on a different remote (e.g. a fork). Try to fetch from a fallback
-                # remote derived from repo_slug if provided.
+                # on a different remote (e.g. a fork). Try multiple strategies:
+                # 1. Fetch all pull request refs (already done in refresh_repo)
+                # 2. Try fetching the specific commit directly from origin
+                # 3. If repo_slug provided, try fetching from a fork remote
                 if not self._commit_exists(repo, commit_sha):
-                    if repo_slug:
+                    LOG.warning(
+                        "Commit %s not found after initial fetch, trying alternate strategies",
+                        commit_sha,
+                    )
+                    
+                    # Strategy 1: Try fetching the specific commit SHA directly
+                    try:
+                        run_command(
+                            ["git", "fetch", "origin", commit_sha],
+                            cwd=repo,
+                            allow_fail=False,
+                        )
+                        if self._commit_exists(repo, commit_sha):
+                            LOG.info("Found commit %s via direct SHA fetch", commit_sha)
+                        else:
+                            LOG.warning("Direct SHA fetch completed but commit still missing")
+                    except Exception as e:
+                        LOG.debug("Direct SHA fetch failed: %s", e)
+                    
+                    # Strategy 2: If still missing and repo_slug exists, try fork fetch
+                    if not self._commit_exists(repo, commit_sha) and repo_slug:
                         try:
                             fallback_url = normalize_repo_url(None, repo_slug)
                         except Exception:
@@ -325,20 +353,30 @@ class SonarCommitRunner:
                                 )
                             else:
                                 LOG.error(
-                                    "Commit %s not found in origin or fork repository %s",
+                                    "Commit %s not found in origin, pull requests, or fork repository %s",
                                     commit_sha,
                                     fallback_url,
                                 )
                                 raise RuntimeError(
-                                    f"Commit {commit_sha} not found in origin or fork repository"
+                                    f"Commit {commit_sha} not found in origin or fork repository. "
+                                    f"This commit may belong to a different fork that is not accessible."
                                 )
-                    else:
+                        else:
+                            LOG.error(
+                                "Commit %s not found and no valid fork URL to try",
+                                commit_sha,
+                            )
+                            raise RuntimeError(
+                                f"Commit {commit_sha} not found in repository"
+                            )
+                    elif not self._commit_exists(repo, commit_sha):
                         LOG.error(
                             "Commit %s not found and no repo_slug provided to fetch from fork",
                             commit_sha,
                         )
                         raise RuntimeError(
-                            f"Commit {commit_sha} not found in repository"
+                            f"Commit {commit_sha} not found in repository. "
+                            f"It may belong to a fork that is not accessible."
                         )
 
                 # Now attempt to create the worktree (will raise if commit still missing)
