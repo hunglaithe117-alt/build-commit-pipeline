@@ -8,6 +8,8 @@ from pymongo import ReturnDocument
 
 from app.services.repository_base import MongoRepositoryBase
 
+_UNSET = object()
+
 
 class FailedCommitsRepository(MongoRepositoryBase):
     def insert_failed_commit(self, payload: Dict[str, Any], reason: str) -> Dict[str, Any]:
@@ -19,6 +21,7 @@ class FailedCommitsRepository(MongoRepositoryBase):
             "config_override": payload.get("commit", {}).get("config_override"),
             "config_source": payload.get("commit", {}).get("config_source"),
             "counted": True,
+            "fork_search": None,
             "created_at": now,
             "updated_at": now,
         }
@@ -87,6 +90,7 @@ class FailedCommitsRepository(MongoRepositoryBase):
         resolved_at: Any = None,
         payload: Any = None,
         counted: Optional[bool] = None,
+        fork_search: Any = _UNSET,
     ) -> Optional[Dict[str, Any]]:
         updates: Dict[str, Any] = {"updated_at": datetime.utcnow()}
         if config_override is not None:
@@ -101,6 +105,8 @@ class FailedCommitsRepository(MongoRepositoryBase):
             updates["payload"] = payload
         if counted is not None:
             updates["counted"] = counted
+        if fork_search is not _UNSET:
+            updates["fork_search"] = fork_search
         doc = self.db[self.collections.failed_commits_collection].find_one_and_update(
             {"_id": ObjectId(record_id)},
             {"$set": updates},

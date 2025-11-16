@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import Enum
-from typing import Dict, Optional
+from typing import Dict, Optional, Literal
 
 from pydantic import BaseModel
 
@@ -65,6 +65,16 @@ class ScanJob(BaseModel):
     log_path: Optional[str] = None
     config_override: Optional[str] = None
     config_source: Optional[str] = None
+    fork_repo_url: Optional[str] = None
+    fork_repo_slug: Optional[str] = None
+
+
+class FailedCommitForkSearch(BaseModel):
+    status: Literal["found", "not_found", "error"]
+    checked_at: datetime
+    fork_full_name: Optional[str] = None
+    fork_clone_url: Optional[str] = None
+    message: Optional[str] = None
 
 
 class ScanResult(BaseModel):
@@ -87,3 +97,4 @@ class FailedCommit(BaseModel):
     created_at: datetime
     updated_at: Optional[datetime] = None
     resolved_at: Optional[datetime] = None
+    fork_search: Optional[FailedCommitForkSearch] = None

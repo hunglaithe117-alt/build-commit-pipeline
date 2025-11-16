@@ -188,6 +188,7 @@ def run_scan_job(self, scan_job_id: str) -> str:
             commit_sha=job["commit_sha"],
             repo_slug=job.get("repo_slug"),
             config_path=config_path,
+            fork_repo_url=job.get("fork_repo_url"),
         )
     except Exception as exc:
         message = str(exc).lower()

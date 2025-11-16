@@ -85,6 +85,28 @@ export type ScanResult = {
   created_at: string;
 };
 
+export type FailedCommitForkSearch = {
+  status: "found" | "not_found" | "error";
+  checked_at: string;
+  fork_full_name?: string | null;
+  fork_clone_url?: string | null;
+  message?: string | null;
+};
+
+export type FailedCommit = {
+  id: string;
+  reason: string;
+  status: string;
+  payload: Record<string, any>;
+  config_override?: string | null;
+  config_source?: string | null;
+  counted: boolean;
+  created_at: string;
+  updated_at?: string | null;
+  resolved_at?: string | null;
+  fork_search?: FailedCommitForkSearch | null;
+};
+
 export type TriggerCollectionResult =
   | { status: "queued" }
   | { status: "retrying_failed"; count: number };
@@ -219,4 +241,38 @@ export const api = {
         filters: filters ? JSON.stringify(filters) : undefined,
       })
     ),
+  listFailedCommitsPaginated: (
+    page?: number,
+    pageSize?: number,
+    sortBy?: string,
+    sortDir?: string,
+    filters?: Record<string, any>
+  ) =>
+    apiFetch<{ items: FailedCommit[]; total: number }>(
+      buildPath("/api/failed-commits", {
+        page: page ?? 1,
+        page_size: pageSize,
+        sort_by: sortBy,
+        sort_dir: sortDir,
+        filters: filters ? JSON.stringify(filters) : undefined,
+      })
+    ),
+  getFailedCommit: (id: string) =>
+    apiFetch<FailedCommit>(`/api/failed-commits/${id}`),
+  retryFailedCommit: (
+    id: string,
+    payload: { config_override?: string; config_source?: string }
+  ) =>
+    apiFetch<FailedCommit>(`/api/failed-commits/${id}/retry`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  discoverFailedCommitFork: (
+    id: string,
+    payload: { enqueue?: boolean; force?: boolean; github_token?: string }
+  ) =>
+    apiFetch<FailedCommit>(`/api/failed-commits/${id}/discover`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
 };

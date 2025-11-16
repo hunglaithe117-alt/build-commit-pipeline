@@ -41,6 +41,8 @@ class ScanJobsRepository(MongoRepositoryBase):
             "log_path": None,
             "config_override": None,
             "config_source": None,
+            "fork_repo_url": None,
+            "fork_repo_slug": None,
             "created_at": now,
             "updated_at": now,
             "last_started_at": None,
@@ -97,6 +99,8 @@ class ScanJobsRepository(MongoRepositoryBase):
         log_path: Any = _UNSET,
         config_override: Any = _UNSET,
         config_source: Any = _UNSET,
+        fork_repo_url: Any = _UNSET,
+        fork_repo_slug: Any = _UNSET,
     ) -> Optional[Dict[str, Any]]:
         set_updates: Dict[str, Any] = {"updated_at": datetime.utcnow()}
         if status:
@@ -123,6 +127,10 @@ class ScanJobsRepository(MongoRepositoryBase):
             set_updates["config_override"] = config_override
         if config_source is not _UNSET:
             set_updates["config_source"] = config_source
+        if fork_repo_url is not _UNSET:
+            set_updates["fork_repo_url"] = fork_repo_url
+        if fork_repo_slug is not _UNSET:
+            set_updates["fork_repo_slug"] = fork_repo_slug
 
         update_doc: Dict[str, Any] = {"$set": set_updates}
         if retry_count_delta:
