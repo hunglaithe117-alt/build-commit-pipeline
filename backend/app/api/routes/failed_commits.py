@@ -101,6 +101,8 @@ async def retry_failed_commit(
         config_source=config_source if config_override else None,
         last_error=None,
         status=ScanJobStatus.pending.value,
+        retry_count_delta=1,
+        retry_count=None,
     )
 
     run_scan_job.delay(job_id)
