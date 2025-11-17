@@ -11,7 +11,11 @@ from pydantic import BaseModel, Field
 from app.models import FailedCommit, ScanJobStatus
 from app.services import repository
 from app.tasks.sonar import run_scan_job
-from pipeline.github_fork_finder import GitHubForkFinder, GitHubRateLimitError
+from pipeline.github_fork_finder import (
+    GitHubForkFinder,
+    GitHubRateLimitError,
+    resolve_github_token_pool,
+)
 from pipeline.fork_commit_resolver import resolve_record
 
 router = APIRouter()
@@ -37,7 +41,7 @@ class ForkDiscoveryRequest(BaseModel):
     )
     github_token: Optional[str] = Field(
         default=None,
-        description="GitHub token override (defaults to server environment value)",
+        description="Comma/newline separated GitHub tokens to use for this request",
     )
 
 
@@ -146,9 +150,13 @@ async def discover_failed_commit(
             detail="Fork search already recorded for this commit. Set force=true to rerun.",
         )
 
-    github_token = payload.github_token or os.getenv("GITHUB_TOKEN")
     fork_pages = int(os.getenv("GITHUB_FORK_PAGES", "5") or "5")
-    finder = GitHubForkFinder(token=github_token, max_pages=fork_pages)
+    token_pool, fallback_token = resolve_github_token_pool(payload.github_token)
+    finder = GitHubForkFinder(
+        tokens=token_pool or None,
+        token=fallback_token,
+        max_pages=fork_pages,
+    )
     task_runner_cache = [None]
 
     def _run():

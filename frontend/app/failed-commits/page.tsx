@@ -51,6 +51,7 @@ export default function FailedCommitsPage() {
       const mergedFilters = {
         ...(params.filters || {}),
         status: statusFilter || undefined,
+        reason: { $ne: "missing-fork" },
       };
       try {
         const sortBy = params.sorting?.id;
@@ -387,7 +388,7 @@ export default function FailedCommitsPage() {
                   </label>
                 </div>
                 <Input
-                  placeholder="GitHub token (optional)"
+                  placeholder="GitHub tokens (comma/newline separated)"
                   value={githubToken}
                   onChange={(event) => setGithubToken(event.target.value)}
                 />

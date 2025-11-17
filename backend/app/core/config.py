@@ -104,6 +104,10 @@ class S3Settings(BaseModel):
     error_logs_prefix: str = Field(default="error-logs")
 
 
+class GitHubSettings(BaseModel):
+    tokens: List[str] = Field(default_factory=list)
+
+
 class Settings(BaseModel):
     environment: str = Field(default="local")
     paths: PathsSettings = Field(default_factory=PathsSettings)
@@ -115,6 +119,7 @@ class Settings(BaseModel):
     web: WebSettings = Field(default_factory=WebSettings)
     logging: LoggingSettings = Field(default_factory=LoggingSettings)
     s3: S3Settings = Field(default_factory=S3Settings)
+    github: GitHubSettings = Field(default_factory=GitHubSettings)
 
     @property
     def sonar_token(self) -> str:

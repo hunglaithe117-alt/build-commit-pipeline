@@ -18,10 +18,6 @@ from urllib3.util.retry import Retry
 
 from app.core.config import SonarInstanceSettings, settings
 from app.services.s3_service import s3_service
-from pipeline.github_fork_finder import (
-    GitHubForkFinder,
-    GitHubRateLimitError,
-)
 
 LOG = logging.getLogger("pipeline.sonar")
 _RUNNER_CACHE: Dict[tuple[str, str], "SonarCommitRunner"] = {}
@@ -35,6 +31,24 @@ class CommitScanResult:
     instance_name: str
     skipped: bool = False
     s3_log_key: Optional[str] = None  # S3 key if uploaded to S3
+
+
+class MissingForkCommit(RuntimeError):
+    """Raised when a commit is not available in the origin repository."""
+
+    def __init__(self, commit_sha: str, repo_slug: Optional[str]):
+        self.commit_sha = commit_sha
+        self.repo_slug = repo_slug
+        if repo_slug:
+            message = (
+                f"Commit {commit_sha} not found in origin repository {repo_slug}. "
+                "It likely lives on a fork."
+            )
+        else:
+            message = (
+                f"Commit {commit_sha} not found in origin repository or any known remote."
+            )
+        super().__init__(message)
 
 
 def normalize_repo_url(repo_url: Optional[str], repo_slug: Optional[str]) -> str:
@@ -86,12 +100,6 @@ class SonarCommitRunner:
         self.token = self.instance.resolved_token()
         self.session = requests.Session()
         self.session.auth = (self.token, "")
-        github_token = os.getenv("GITHUB_TOKEN")
-        max_pages = int(os.getenv("GITHUB_FORK_PAGES", "5") or "5")
-        self.github_fork_finder = GitHubForkFinder(
-            token=github_token,
-            max_pages=max_pages,
-        )
 
     def ensure_repo(self, repo_url: str) -> Path:
         if self.repo_dir.exists() and (self.repo_dir / ".git").exists():
@@ -355,71 +363,13 @@ class SonarCommitRunner:
                                 commit_sha,
                             )
 
-                    # Strategy 3: use GitHub API to find the fork when a slug is available
                     if not self._commit_exists(repo, commit_sha):
                         if repo_slug:
-                            LOG.info(
-                                "Commit %s not in main repo, searching for fork via GitHub API",
-                                commit_sha,
-                            )
-                            fork_url: Optional[str] = None
-                            try:
-                                match = self.github_fork_finder.find_commit_repo(
-                                    repo_slug, commit_sha
-                                )
-                                if match:
-                                    fork_url = match.clone_url
-                            except GitHubRateLimitError as exc:
-                                LOG.warning(
-                                    "GitHub rate limit while searching for %s: %s",
-                                    commit_sha,
-                                    exc,
-                                )
-                                raise RuntimeError(str(exc)) from exc
-                            except Exception as exc:
-                                LOG.warning(
-                                    "Error searching for commit %s via GitHub API: %s",
-                                    commit_sha,
-                                    exc,
-                                )
-
-                            if fork_url and self._fetch_commit_from_fork(
-                                repo, commit_sha, fork_url
-                            ):
-                                LOG.info(
-                                    "Successfully retrieved commit %s from fork %s",
-                                    commit_sha,
-                                    fork_url,
-                                )
-                            elif fork_url:
-                                LOG.error(
-                                    "Failed to fetch commit %s from identified fork %s",
-                                    commit_sha,
-                                    fork_url,
-                                )
-                                raise RuntimeError(
-                                    f"Commit {commit_sha} was found in fork {fork_url} "
-                                    f"but could not be fetched. This may be due to network issues."
-                                )
-                            else:
-                                LOG.error(
-                                    "Commit %s not found in origin repository or any accessible forks",
-                                    commit_sha,
-                                )
-                                raise RuntimeError(
-                                    f"Commit {commit_sha} not found in repository {repo_slug} "
-                                    f"or any of its forks. This commit may belong to a private fork "
-                                    f"or may have been deleted."
-                                )
-                        else:
-                            LOG.error(
-                                "Commit %s not found and no repo_slug provided to search forks",
-                                commit_sha,
-                            )
-                            raise RuntimeError(
-                                f"Commit {commit_sha} not found in repository. "
-                                f"It may belong to a fork that is not accessible."
-                            )
+                            raise MissingForkCommit(commit_sha, repo_slug)
+                        raise RuntimeError(
+                            f"Commit {commit_sha} not found in repository. "
+                            "It may belong to a fork that is not accessible."
+                        )
 
                 # Now attempt to create the worktree (will raise if commit still missing)
                 worktree = self.create_worktree(commit_sha)
@@ -551,6 +501,7 @@ __all__ = [
     "SonarCommitRunner",
     "MetricsExporter",
     "CommitScanResult",
+    "MissingForkCommit",
     "normalize_repo_url",
     "get_runner_for_instance",
 ]

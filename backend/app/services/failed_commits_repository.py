@@ -114,6 +114,52 @@ class FailedCommitsRepository(MongoRepositoryBase):
         )
         return self._serialize(doc) if doc else None
 
+    def aggregate_missing_forks(self, *, limit: int = 100) -> List[Dict[str, Any]]:
+        pipeline = [
+            {
+                "$match": {
+                    "reason": "missing-fork",
+                    "payload.repo_slug": {"$ne": None},
+                }
+            },
+            {
+                "$group": {
+                    "_id": "$payload.repo_slug",
+                    "count": {"$sum": 1},
+                    "commits": {"$push": "$payload.commit_sha"},
+                    "record_ids": {"$push": "$_id"},
+                    "updated_at": {"$max": "$updated_at"},
+                }
+            },
+            {"$sort": {"count": -1}},
+            {"$limit": limit},
+        ]
+        cursor = self.db[self.collections.failed_commits_collection].aggregate(
+            pipeline
+        )
+        results = []
+        for doc in cursor:
+            repo_slug = doc.get("_id")
+            results.append(
+                {
+                    "repo_slug": repo_slug,
+                    "count": doc.get("count", 0),
+                    "commit_shas": [sha for sha in doc.get("commits", []) if sha],
+                    "record_ids": [str(rid) for rid in doc.get("record_ids", [])],
+                    "updated_at": doc.get("updated_at"),
+                }
+            )
+        return results
+
+    def list_failed_commits_by_repo(
+        self, repo_slug: str, *, reason: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
+        query: Dict[str, Any] = {"payload.repo_slug": repo_slug}
+        if reason:
+            query["reason"] = reason
+        cursor = self.db[self.collections.failed_commits_collection].find(query)
+        return [self._serialize(doc) for doc in cursor]
+
     def count_by_job_id(self, job_id: str) -> int:
         """Count failed commits for a specific job."""
         return self.db[self.collections.failed_commits_collection].count_documents(

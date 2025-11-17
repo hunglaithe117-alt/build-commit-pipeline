@@ -107,6 +107,13 @@ export type FailedCommit = {
   fork_search?: FailedCommitForkSearch | null;
 };
 
+export type ForkResolverRepo = {
+  repo_slug: string;
+  count: number;
+  commit_shas: string[];
+  record_ids: string[];
+  updated_at?: string | null;
+};
 export type TriggerCollectionResult =
   | { status: "queued" }
   | { status: "retrying_failed"; count: number };
@@ -272,6 +279,16 @@ export const api = {
     payload: { enqueue?: boolean; force?: boolean; github_token?: string }
   ) =>
     apiFetch<FailedCommit>(`/api/failed-commits/${id}/discover`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  listForkResolverRepos: (limit?: number) =>
+    apiFetch<ForkResolverRepo[]>(buildPath("/api/fork-resolver/repos", { limit })),
+  discoverForkResolverRepo: (
+    repoSlug: string,
+    payload: { enqueue?: boolean; force?: boolean; github_token?: string }
+  ) =>
+    apiFetch<ForkResolverRepo[]>(`/api/fork-resolver/repos/${repoSlug}/discover`, {
       method: "POST",
       body: JSON.stringify(payload),
     }),

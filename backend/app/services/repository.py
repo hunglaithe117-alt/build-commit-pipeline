@@ -105,5 +105,11 @@ class Repository:
     def count_failed_commits_by_project(self, *a, **k):
         return self.failed_commits.count_by_project_id(*a, **k)
 
+    def aggregate_missing_forks(self, *a, **k):
+        return self.failed_commits.aggregate_missing_forks(*a, **k)
+
+    def list_failed_commits_by_repo(self, *a, **k):
+        return self.failed_commits.list_failed_commits_by_repo(*a, **k)
+
 
 repository = Repository()

@@ -5,6 +5,7 @@ from app.services.repository import repository
 from pipeline.github_fork_finder import (
     GitHubForkFinder,
     GitHubRateLimitError,
+    resolve_github_token_pool,
 )
 
 import argparse
@@ -258,8 +259,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--github-token",
-        default=os.getenv("GITHUB_TOKEN"),
-        help="GitHub token used for the lookup (defaults to $GITHUB_TOKEN).",
+        default=None,
+        help="GitHub token(s) for lookup (comma/newline separated). Defaults to pool from env.",
     )
     parser.add_argument(
         "--max-pages",
@@ -284,7 +285,12 @@ def main(argv: Optional[Iterable[str]] = None) -> Dict[str, int]:
         format="%(levelname)s %(name)s: %(message)s",
     )
 
-    finder = GitHubForkFinder(token=args.github_token, max_pages=args.max_pages)
+    token_pool, fallback_token = resolve_github_token_pool(args.github_token)
+    finder = GitHubForkFinder(
+        tokens=token_pool or None,
+        token=fallback_token,
+        max_pages=args.max_pages,
+    )
     try:
         summary = resolve_failed_commits(
             finder=finder,

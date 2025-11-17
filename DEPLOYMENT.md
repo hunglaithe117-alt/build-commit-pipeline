@@ -32,6 +32,8 @@ Components: stable
 Signed-By: /etc/apt/keyrings/docker.asc
 EOF
 
+sudo apt update
+
 sudo apt install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
 
 # Add ubuntu user to docker group
@@ -40,9 +42,6 @@ sudo usermod -aG docker ubuntu
 # Enable Docker to start on boot
 sudo systemctl enable docker
 
-# Log out and back in for group changes to take effect
-exit
-# SSH back in
 ```
 
 ### 3. Configure Permissions
@@ -62,21 +61,26 @@ cat .env
 ### 4. Configure Pipeline Settings
 
 ```bash
-docker-compose start sonarqube
+#Run sonarqube first
+docker compose up -d sonarqube
 
 # Generate token api
 curl -u "USER_NAME:PASS" -X POST \
   "http://YOUR_SONAR_HOST/api/user_tokens/generate" \
   -d "name=my-ci-token" \
   -d "type=USER_TOKEN"
-  
+
 # Create webhook
 curl -u "USER_NAME:PASS" -X POST \
   "http://YOUR_SONAR_HOST/api/webhooks/create" \
   -d "name=Global CI Webhook" \
   -d "url=https://your-endpoint.example.com/sonar-webhook" \
   -d "secret=YOUR_SECRET_STRING"
-
+curl -u "admin:admin" -X POST \
+  "http://localhost:9001/api/webhooks/create" \
+  -d "name=Global CI Webhook" \
+  -d "url=https://172.31.24.235:8000/sonar-webhook" \
+  -d "secret=YOUR_SECRET_STRING"
 # Update SonarQube configuration
 nano config/pipeline.yml
 
@@ -88,16 +92,16 @@ nano config/pipeline.yml
 
 ```bash
 # Build all Docker images
-docker-compose build
+docker compose build
 
 # Start all services
-docker-compose up -d
+docker compose up -d
 
 # Check service status
-docker-compose ps
+docker compose ps
 
 # View logs
-docker-compose logs -f api
+docker compose logs -f api
 ```
 
 ### 8. Verify Installation

@@ -9,7 +9,12 @@ from app.celery_app import celery_app
 from app.core.config import settings
 from app.models import ProjectStatus, ScanJobStatus
 from app.services import repository
-from pipeline.sonar import MetricsExporter, get_runner_for_instance, normalize_repo_url
+from pipeline.sonar import (
+    MetricsExporter,
+    MissingForkCommit,
+    get_runner_for_instance,
+    normalize_repo_url,
+)
 
 logger = get_task_logger(__name__)
 
@@ -87,6 +92,7 @@ def _handle_scan_failure(
     now = datetime.utcnow()
     message = str(exc)
     permanent = isinstance(exc, PermanentScanError)
+    failure_reason = getattr(exc, "failure_reason", "scan-failed")
     status = (
         ScanJobStatus.failed_permanent.value
         if permanent
@@ -109,7 +115,12 @@ def _handle_scan_failure(
             last_error=message,
             last_finished_at=now,
         )
-        _record_failed_commit(job, project, reason="scan-failed", error=message)
+        _record_failed_commit(
+            job,
+            project,
+            reason=failure_reason,
+            error=message,
+        )
         _check_project_completion(project["id"])
         logger.error(
             "Scan job %s failed permanently after %s attempts: %s",
@@ -190,10 +201,17 @@ def run_scan_job(self, scan_job_id: str) -> str:
             config_path=config_path,
             fork_repo_url=job.get("fork_repo_url"),
         )
+    except MissingForkCommit as exc:
+        tagged = PermanentScanError(str(exc))
+        setattr(tagged, "failure_reason", "missing-fork")
+        setattr(tagged, "missing_repo_slug", exc.repo_slug)
+        return _handle_scan_failure(self, job, project, tagged)
     except Exception as exc:
         message = str(exc).lower()
         if "not found" in message and "commit" in message:
-            exc = PermanentScanError(str(exc))
+            tagged = PermanentScanError(str(exc))
+            setattr(tagged, "failure_reason", "missing-fork")
+            exc = tagged
         return _handle_scan_failure(self, job, project, exc)
 
     repository.update_scan_job(
