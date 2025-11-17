@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 from typing import Any, Dict, Optional
+import time
 
 from celery.utils.log import get_task_logger
 
@@ -10,6 +11,7 @@ from app.core.config import settings
 from app.models import ProjectStatus, ScanJobStatus
 from app.services import repository
 from pipeline.commit_replay import MissingForkCommitError
+from pipeline.github_api import GitHubRateLimitError
 from pipeline.sonar import MetricsExporter, get_runner_for_instance, normalize_repo_url
 
 logger = get_task_logger(__name__)
@@ -86,6 +88,7 @@ def _handle_scan_failure(
     exc: Exception,
     *,
     failure_reason: str = "scan-failed",
+    retry_countdown: Optional[int] = None,
 ) -> str:
     now = datetime.utcnow()
     message = str(exc)
@@ -126,14 +129,16 @@ def _handle_scan_failure(
         task.max_retries = max_retries
     except Exception:
         pass
+    countdown = max(0, retry_countdown or 0)
     logger.warning(
-        "Scan job %s failed temporarily (attempt %s/%s): %s",
+        "Scan job %s failed temporarily (attempt %s/%s). Retrying in %ss: %s",
         job["id"],
         retry_count,
         max_retries,
+        countdown,
         message,
     )
-    raise task.retry(exc=exc, countdown=0)
+    raise task.retry(exc=exc, countdown=countdown)
 
 
 @celery_app.task(bind=True, max_retries=None)
@@ -191,6 +196,16 @@ def run_scan_job(self, scan_job_id: str) -> str:
             commit_sha=job["commit_sha"],
             repo_slug=job.get("repo_slug"),
             config_path=config_path,
+        )
+    except GitHubRateLimitError as exc:
+        wait_seconds = max(0, int(max(0.0, exc.retry_at - time.time())) + 1)
+        return _handle_scan_failure(
+            self,
+            job,
+            project,
+            exc,
+            failure_reason="github-rate-limit",
+            retry_countdown=wait_seconds,
         )
     except MissingForkCommitError as exc:
         return _handle_scan_failure(

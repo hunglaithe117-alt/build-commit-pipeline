@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, List
 
-from pipeline.github_api import GitHubAPI, GitHubAPIError
+from pipeline.github_api import GitHubAPI, GitHubAPIError, GitHubRateLimitError
 
 LOG = logging.getLogger("pipeline.commit_replay")
 
@@ -59,6 +59,8 @@ def build_replay_plan(
             )
         try:
             payload = github.get_commit(repo_slug, current)
+        except GitHubRateLimitError:
+            raise
         except GitHubAPIError as exc:
             raise MissingForkCommitError(
                 current,
@@ -72,6 +74,8 @@ def build_replay_plan(
             )
         try:
             patch = github.get_commit_patch(repo_slug, current)
+        except GitHubRateLimitError:
+            raise
         except GitHubAPIError as exc:
             raise MissingForkCommitError(
                 current,

@@ -13,12 +13,25 @@ from app.core.config import settings
 LOG = logging.getLogger("pipeline.github")
 
 
+class AllTokensRateLimited(RuntimeError):
+    def __init__(self, retry_at: float) -> None:
+        self.retry_at = retry_at
+        human = time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(retry_at))
+        super().__init__(f"All GitHub tokens are rate limited until {human} UTC")
+
+
 class GitHubAPIError(RuntimeError):
     """Raised when the GitHub API returns an error response."""
 
     def __init__(self, status_code: int, message: str) -> None:
         self.status_code = status_code
         super().__init__(message)
+
+
+class GitHubRateLimitError(GitHubAPIError):
+    def __init__(self, retry_at: float, message: str) -> None:
+        super().__init__(403, message)
+        self.retry_at = retry_at
 
 
 class GitHubTokenPool:
@@ -47,9 +60,7 @@ class GitHubTokenPool:
                 self._cursor = (self._cursor + 1) % len(self.tokens)
                 if self._cooldowns.get(token, 0.0) <= now:
                     return token
-        raise RuntimeError(
-            "All GitHub tokens are temporarily rate limited. Wait for reset and retry."
-        )
+        raise AllTokensRateLimited(self.next_available_at())
 
     def mark_rate_limited(self, token: str, reset_epoch: Optional[int]) -> None:
         if token not in self._cooldowns:
@@ -59,6 +70,11 @@ class GitHubTokenPool:
             self._cooldowns[token] = max(cooldown, time.time() + 1.0)
         reset_text = time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(cooldown))
         LOG.warning("GitHub token exhausted, cooling down until %s", reset_text)
+
+    def next_available_at(self) -> float:
+        if not self._cooldowns:
+            return time.time()
+        return min(self._cooldowns.values())
 
 
 class GitHubAPI:
@@ -89,8 +105,11 @@ class GitHubAPI:
             attempts += 1
             try:
                 token = self.token_pool.acquire()
-            except RuntimeError as exc:
-                raise GitHubAPIError(403, str(exc)) from exc
+            except AllTokensRateLimited as exc:
+                raise GitHubRateLimitError(
+                    retry_at=exc.retry_at,
+                    message=str(exc),
+                ) from exc
             headers = {
                 "Accept": accept,
                 "Authorization": f"token {token}",
