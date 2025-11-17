@@ -18,6 +18,12 @@ from urllib3.util.retry import Retry
 
 from app.core.config import SonarInstanceSettings, settings
 from app.services.s3_service import s3_service
+from pipeline.commit_replay import (
+    MissingForkCommitError,
+    apply_replay_plan,
+    build_replay_plan,
+)
+from pipeline.github_api import get_github_client
 
 LOG = logging.getLogger("pipeline.sonar")
 _RUNNER_CACHE: Dict[tuple[str, str], "SonarCommitRunner"] = {}
@@ -82,6 +88,9 @@ class SonarCommitRunner:
         self.token = self.instance.resolved_token()
         self.session = requests.Session()
         self.session.auth = (self.token, "")
+        self.github_client = get_github_client()
+        self.github_settings = getattr(settings, "github", None)
+        self.max_parent_hops = getattr(self.github_settings, "max_parent_hops", 50)
 
     def ensure_repo(self, repo_url: str) -> Path:
         if self.repo_dir.exists() and (self.repo_dir / ".git").exists():
@@ -178,12 +187,30 @@ class SonarCommitRunner:
             )
             return False
 
+    def _replay_missing_commit(self, repo_slug: str, commit_sha: str) -> Path:
+        if not self.github_client:
+            raise MissingForkCommitError(
+                commit_sha,
+                "GitHub token pool is empty; configure github.tokens to replay fork commits.",
+            )
+        plan = build_replay_plan(
+            github=self.github_client,
+            repo_slug=repo_slug,
+            target_sha=commit_sha,
+            commit_exists=lambda sha: self._commit_exists(self.repo_dir, sha),
+            max_depth=self.max_parent_hops,
+        )
+        worktree = self.create_worktree(plan.base_sha, worktree_id=commit_sha)
+        apply_replay_plan(worktree, plan)
+        return worktree
+
     # def checkout_commit(self, commit_sha: str) -> None:
     #     run_command(["git", "checkout", "-f", commit_sha], cwd=self.repo_dir)
     #     run_command(["git", "clean", "-fdx"], cwd=self.repo_dir, allow_fail=True)
 
-    def create_worktree(self, commit_sha: str) -> Path:
-        target = self.worktrees_dir / commit_sha
+    def create_worktree(self, commit_sha: str, *, worktree_id: Optional[str] = None) -> Path:
+        identifier = worktree_id or commit_sha
+        target = self.worktrees_dir / identifier
         if target.exists():
             run_command(
                 ["git", "worktree", "remove", str(target), "--force"],
@@ -199,8 +226,8 @@ class SonarCommitRunner:
         run_command(["git", "clean", "-fdx"], cwd=target, allow_fail=True)
         return target
 
-    def remove_worktree(self, commit_sha: str) -> None:
-        target = self.worktrees_dir / commit_sha
+    def remove_worktree(self, worktree_id: str) -> None:
+        target = self.worktrees_dir / worktree_id
         if target.exists():
             run_command(
                 ["git", "worktree", "remove", str(target), "--force"],
@@ -304,83 +331,73 @@ class SonarCommitRunner:
             )
 
         worktree: Optional[Path] = None
+        worktree_id = commit_sha
         s3_log_key: Optional[str] = None
         try:
             with self.repo_mutex():
                 self.refresh_repo(repo_url)
                 repo = self.repo_dir
-
-                # If the commit object is missing after a normal fetch, it may live
-                # on a different remote (e.g. a fork). Try multiple strategies:
-                # 1. Fetch all pull request refs (already done in refresh_repo)
-                # 2. Try fetching the specific commit directly from origin
-                # 3. If repo_slug provided, try fetching from a fork remote
-                if not self._commit_exists(repo, commit_sha):
+                commit_present = self._commit_exists(repo, commit_sha)
+                if not commit_present:
                     LOG.warning(
                         "Commit %s not found after initial fetch, trying alternate strategies",
                         commit_sha,
                     )
-                    
-                    # Strategy 1: Try fetching the specific commit SHA directly
+
+                    # Strategy 1: Try fetching the specific commit SHA directly from origin
                     try:
                         run_command(
                             ["git", "fetch", "origin", commit_sha],
                             cwd=repo,
                             allow_fail=False,
                         )
-                        if self._commit_exists(repo, commit_sha):
+                        commit_present = self._commit_exists(repo, commit_sha)
+                        if commit_present:
                             LOG.info("Found commit %s via direct SHA fetch", commit_sha)
                         else:
-                            LOG.warning("Direct SHA fetch completed but commit still missing")
-                    except Exception as e:
-                        LOG.debug("Direct SHA fetch failed: %s", e)
-                    
-                    # Strategy 2: If still missing and repo_slug exists, try fork fetch
-                    if not self._commit_exists(repo, commit_sha) and repo_slug:
+                            LOG.warning(
+                                "Direct SHA fetch completed but commit %s is still missing",
+                                commit_sha,
+                            )
+                    except Exception as exc:
+                        LOG.debug("Direct SHA fetch failed for %s: %s", commit_sha, exc)
+
+                    # Strategy 2: Try fetching from the fork remote if we can derive a URL
+                    if not commit_present and repo_slug:
                         try:
                             fallback_url = normalize_repo_url(None, repo_slug)
                         except Exception:
                             fallback_url = None
 
                         if fallback_url and fallback_url != repo_url:
-                            # Try to fetch the specific commit from the fork
-                            if self._fetch_commit_from_fork(
-                                repo, commit_sha, fallback_url
-                            ):
-                                LOG.info(
-                                    "Successfully retrieved commit %s from fork",
-                                    commit_sha,
-                                )
+                            if self._fetch_commit_from_fork(repo, commit_sha, fallback_url):
+                                commit_present = self._commit_exists(repo, commit_sha)
+                                if commit_present:
+                                    LOG.info(
+                                        "Successfully retrieved commit %s from fork %s",
+                                        commit_sha,
+                                        fallback_url,
+                                    )
                             else:
-                                LOG.error(
-                                    "Commit %s not found in origin, pull requests, or fork repository %s",
+                                LOG.warning(
+                                    "Commit %s not found in origin or fork repository %s via git fetch",
                                     commit_sha,
                                     fallback_url,
                                 )
-                                raise RuntimeError(
-                                    f"Commit {commit_sha} not found in origin or fork repository. "
-                                    f"This commit may belong to a different fork that is not accessible."
-                                )
                         else:
-                            LOG.error(
-                                "Commit %s not found and no valid fork URL to try",
-                                commit_sha,
+                            LOG.debug(
+                                "No alternate fork URL derived for repo slug %s", repo_slug
                             )
-                            raise RuntimeError(
-                                f"Commit {commit_sha} not found in repository"
-                            )
-                    elif not self._commit_exists(repo, commit_sha):
-                        LOG.error(
-                            "Commit %s not found and no repo_slug provided to fetch from fork",
-                            commit_sha,
-                        )
-                        raise RuntimeError(
-                            f"Commit {commit_sha} not found in repository. "
-                            f"It may belong to a fork that is not accessible."
-                        )
 
-                # Now attempt to create the worktree (will raise if commit still missing)
-                worktree = self.create_worktree(commit_sha)
+                if commit_present:
+                    worktree = self.create_worktree(commit_sha)
+                else:
+                    if not repo_slug:
+                        raise MissingForkCommitError(
+                            commit_sha,
+                            "Commit missing from origin and no repo slug provided for GitHub replay",
+                        )
+                    worktree = self._replay_missing_commit(repo_slug, commit_sha)
 
             effective_config = Path(config_path) if config_path else None
             cmd = self.build_scan_command(component_key, effective_config)
@@ -417,7 +434,7 @@ class SonarCommitRunner:
         finally:
             if worktree is not None:
                 with self.repo_mutex():
-                    self.remove_worktree(commit_sha)
+                    self.remove_worktree(worktree_id)
 
     def detect_project_type(self, root: Path) -> str:
         ruby_hits = 0

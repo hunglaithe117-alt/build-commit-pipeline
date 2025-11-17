@@ -9,6 +9,7 @@ from app.celery_app import celery_app
 from app.core.config import settings
 from app.models import ProjectStatus, ScanJobStatus
 from app.services import repository
+from pipeline.commit_replay import MissingForkCommitError
 from pipeline.sonar import MetricsExporter, get_runner_for_instance, normalize_repo_url
 
 logger = get_task_logger(__name__)
@@ -83,6 +84,8 @@ def _handle_scan_failure(
     job: Dict[str, Any],
     project: Dict[str, Any],
     exc: Exception,
+    *,
+    failure_reason: str = "scan-failed",
 ) -> str:
     now = datetime.utcnow()
     message = str(exc)
@@ -109,7 +112,7 @@ def _handle_scan_failure(
             last_error=message,
             last_finished_at=now,
         )
-        _record_failed_commit(job, project, reason="scan-failed", error=message)
+        _record_failed_commit(job, project, reason=failure_reason, error=message)
         _check_project_completion(project["id"])
         logger.error(
             "Scan job %s failed permanently after %s attempts: %s",
@@ -188,6 +191,14 @@ def run_scan_job(self, scan_job_id: str) -> str:
             commit_sha=job["commit_sha"],
             repo_slug=job.get("repo_slug"),
             config_path=config_path,
+        )
+    except MissingForkCommitError as exc:
+        return _handle_scan_failure(
+            self,
+            job,
+            project,
+            PermanentScanError(str(exc)),
+            failure_reason="missing-fork",
         )
     except Exception as exc:
         message = str(exc).lower()

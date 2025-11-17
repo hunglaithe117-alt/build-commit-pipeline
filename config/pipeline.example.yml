@@ -5,6 +5,9 @@ paths:
   uploads: /app/data/uploads
   exports: /app/data/exports
   default_workdir: /app/data/sonar-work
+github:
+  tokens:
+    - "paste-github-token-here"
 s3:
   enabled: true
   bucket_name: sonar-log-117
