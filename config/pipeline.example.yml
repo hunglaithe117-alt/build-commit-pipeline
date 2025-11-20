@@ -54,7 +54,6 @@ sonarqube:
       - security_issues
       - security_rating
       - security_hotspots
-      - security_hotspots_reviewed_status
       - software_quality_security_rating
       - software_quality_security_issues
       - software_quality_security_remediation_effort
@@ -93,25 +92,19 @@ sonarqube:
       - comment_lines
       - alert_status
       - quality_gate_details
-      - quality_profiles
-      - accepted_issues
-      - high_impact_accepted_issues
       - software_quality_blocker_issues
-      - confirmed_issues
       - critical_violations
-      - false_positive_issues
       - violations
       - software_quality_high_issues
       - info_violations
       - software_quality_low_issues
-      - issues_in_sandbox
       - software_quality_maintainability_issues
       - software_quality_info_issues
       - minor_violations
       - major_violations
       - software_quality_medium_issues
       - open_issues
-      - reopened_issues
+      - blocker_violations
       - last_commit_date
     chunk_size: 25
     output_format: csv
