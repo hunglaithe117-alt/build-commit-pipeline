@@ -22,7 +22,7 @@ echo "Current user: $(whoami) (${CURRENT_UID}:${CURRENT_GID})"
 mkdir -p "${DATA_DIR}/uploads"
 mkdir -p "${DATA_DIR}/exports"
 mkdir -p "${DATA_DIR}/sonar-work"
-mkdir -p "${DATA_DIR}/promtail"
+
 
 # Set ownership and permissions
 # On EC2, you typically have sudo access
