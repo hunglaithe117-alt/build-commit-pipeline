@@ -54,22 +54,22 @@ services:
       - rabbitmq
       - mongo
 
-  worker_exports:
-    build:
-      context: ./backend
-    container_name: build_commit_worker_exports
-    command: celery -A app.celery_app.celery_app worker --loglevel=info -Q pipeline.exports -n exports.%h -c 1
-    user: "${APP_UID:-1000}:${APP_GID:-1000}"
-    restart: unless-stopped
-    environment:
-      PIPELINE_CONFIG: /app/config/pipeline.yml
-      HOME: /tmp  # Required for git operations
-    volumes:
-      - ./config/pipeline.yml:/app/config/pipeline.yml:ro
-      - ./data:/app/data
-    depends_on:
-      - rabbitmq
-      - mongo
+  # worker_exports:
+  #   build:
+  #     context: ./backend
+  #   container_name: build_commit_worker_exports
+  #   command: celery -A app.celery_app.celery_app worker --loglevel=info -Q pipeline.exports -n exports.%h -c 1
+  #   user: "${APP_UID:-1000}:${APP_GID:-1000}"
+  #   restart: unless-stopped
+  #   environment:
+  #     PIPELINE_CONFIG: /app/config/pipeline.yml
+  #     HOME: /tmp  # Required for git operations
+  #   volumes:
+  #     - ./config/pipeline.yml:/app/config/pipeline.yml:ro
+  #     - ./data:/app/data
+  #   depends_on:
+  #     - rabbitmq
+  #     - mongo
 
   beat:
     build:
@@ -155,41 +155,41 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
 
-  loki:
-    image: grafana/loki:3.0.0
-    container_name: loki
-    command: -config.file=/etc/loki/local-config.yaml
-    ports:
-      - "3100:3100"
-    volumes:
-      - loki_data:/loki
+  # loki:
+  #   image: grafana/loki:3.0.0
+  #   container_name: loki
+  #   command: -config.file=/etc/loki/local-config.yaml
+  #   ports:
+  #     - "3100:3100"
+  #   volumes:
+  #     - loki_data:/loki
 
-  alloy:
-    image: grafana/alloy:latest
-    container_name: alloy
-    command: run --server.http.listen-addr=0.0.0.0:12345 --storage.path=/var/lib/alloy/data /etc/alloy/config.alloy
-    volumes:
-      - ./config/alloy-config.alloy:/etc/alloy/config.alloy:ro
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-      - alloy_data:/var/lib/alloy/data
-    ports:
-      - "12345:12345"
-    depends_on:
-      - loki
+  # alloy:
+  #   image: grafana/alloy:latest
+  #   container_name: alloy
+  #   command: run --server.http.listen-addr=0.0.0.0:12345 --storage.path=/var/lib/alloy/data /etc/alloy/config.alloy
+  #   volumes:
+  #     - ./config/alloy-config.alloy:/etc/alloy/config.alloy:ro
+  #     - /var/run/docker.sock:/var/run/docker.sock:ro
+  #     - alloy_data:/var/lib/alloy/data
+  #   ports:
+  #     - "12345:12345"
+  #   depends_on:
+  #     - loki
 
-  grafana:
-    image: grafana/grafana:10.2.3
-    container_name: grafana
-    restart: unless-stopped
-    environment:
-      - GF_SECURITY_ADMIN_USER=admin
-      - GF_SECURITY_ADMIN_PASSWORD=admin
-    ports:
-      - "3001:3000"
-    volumes:
-      - grafana_data:/var/lib/grafana
-    depends_on:
-      - loki
+  # grafana:
+  #   image: grafana/grafana:10.2.3
+  #   container_name: grafana
+  #   restart: unless-stopped
+  #   environment:
+  #     - GF_SECURITY_ADMIN_USER=admin
+  #     - GF_SECURITY_ADMIN_PASSWORD=admin
+  #   ports:
+  #     - "3001:3000"
+  #   volumes:
+  #     - grafana_data:/var/lib/grafana
+  #   depends_on:
+  #     - loki
 
 volumes:
   mongo_data:
